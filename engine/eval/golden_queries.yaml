@@ -1,0 +1,197 @@
+# Pathyam — golden query set for dish resolution
+#
+# Queries a real South Indian user would type. Hand-written rather than generated from
+# the lexicon, because generating queries from the same file you match against measures
+# nothing: every query would be an exact match and the harness would report 100%.
+#
+# Deliberately includes cases that are expected to FAIL or to abstain. A golden set
+# containing only winnable queries is a marketing asset, not an evaluation.
+#
+# Fields:
+#   q            the query text
+#   expect       lexicon key of the correct dish; null = nothing should match
+#   accept       additional keys counted as correct (genuinely equivalent readings)
+#   category     for per-slice reporting
+#   confirm      true if the resolver SHOULD abstain and ask
+#   note         why this case is here, when it is not obvious
+
+queries:
+
+  # ── exact English names ───────────────────────────────────────────────────
+  - {q: "idli",                 expect: idli,             category: exact_en}
+  - {q: "dosa",                 expect: dosa_plain,       category: exact_en}
+  - {q: "masala dosa",          expect: dosa_masala,      category: exact_en}
+  - {q: "rava dosa",            expect: dosa_rava,        category: exact_en}
+  - {q: "uttapam",              expect: uttapam,          category: exact_en}
+  - {q: "medu vada",            expect: vada_medu,        category: exact_en}
+  - {q: "ven pongal",           expect: pongal_ven,       category: exact_en}
+  - {q: "upma",                 expect: upma,             category: exact_en}
+  - {q: "appam",                expect: appam,            category: exact_en}
+  - {q: "idiyappam",            expect: idiyappam,        category: exact_en}
+  - {q: "puttu",                expect: puttu,            category: exact_en}
+  - {q: "ragi mudde",           expect: ragi_mudde,       category: exact_en}
+  - {q: "parotta",              expect: parotta,          category: exact_en}
+  - {q: "curd rice",            expect: curd_rice,        category: exact_en}
+  - {q: "lemon rice",           expect: lemon_rice,       category: exact_en}
+  - {q: "tamarind rice",        expect: tamarind_rice,    category: exact_en}
+  - {q: "bisi bele bath",       expect: bisi_bele_bath,   category: exact_en}
+  - {q: "sambar",               expect: sambar,           category: exact_en}
+  - {q: "rasam",                expect: rasam,            category: exact_en}
+  - {q: "aviyal",               expect: aviyal,           category: exact_en}
+  - {q: "thoran",               expect: thoran,           category: exact_en}
+  - {q: "coconut chutney",      expect: coconut_chutney,  category: exact_en}
+  - {q: "mysore pak",           expect: mysore_pak,       category: exact_en}
+  - {q: "payasam",              expect: payasam,          category: exact_en}
+
+  # ── native script ─────────────────────────────────────────────────────────
+  - {q: "இட்லி",                expect: idli,             category: native_ta}
+  - {q: "தோசை",                 expect: dosa_plain,       category: native_ta}
+  - {q: "மசாலா தோசை",           expect: dosa_masala,      category: native_ta}
+  - {q: "சாம்பார்",              expect: sambar,           category: native_ta}
+  - {q: "ரசம்",                  expect: rasam,            category: native_ta}
+  - {q: "தயிர் சாதம்",           expect: curd_rice,        category: native_ta}
+  - {q: "புளியோதரை",            expect: tamarind_rice,    category: native_ta}
+  - {q: "மெது வடை",             expect: vada_medu,        category: native_ta}
+  - {q: "ದೋಸೆ",                 expect: dosa_plain,       category: native_kn}
+  - {q: "ಮಸಾಲೆ ದೋಸೆ",           expect: dosa_masala,      category: native_kn}
+  - {q: "ಮೊಸರನ್ನ",              expect: curd_rice,        category: native_kn}
+  - {q: "ಬಿಸಿ ಬೇಳೆ ಬಾತ್",        expect: bisi_bele_bath,   category: native_kn}
+  - {q: "ಉಪ್ಪಿಟ್ಟು",              expect: upma,             category: native_kn}
+  - {q: "ರಾಗಿ ಮುದ್ದೆ",            expect: ragi_mudde,       category: native_kn}
+  - {q: "ദോശ",                  expect: dosa_plain,       category: native_ml}
+  - {q: "അപ്പം",                 expect: appam,            category: native_ml}
+  - {q: "പുട്ട്",                  expect: puttu,            category: native_ml}
+  - {q: "അവിയൽ",                expect: aviyal,           category: native_ml}
+  - {q: "തോരൻ",                 expect: thoran,           category: native_ml}
+  - {q: "ഇടിയപ്പം",              expect: idiyappam,        category: native_ml}
+  - {q: "దోస",                  expect: dosa_plain,       category: native_te}
+  - {q: "ఇడ్లీ",                  expect: idli,             category: native_te}
+  - {q: "పులిహోర",              expect: tamarind_rice,    category: native_te}
+  - {q: "పెరుగన్నం",             expect: curd_rice,        category: native_te}
+  - {q: "గోంగూర పచ్చడి",         expect: gongura_pachadi,  category: native_te}
+
+  # ── romanised regional forms ──────────────────────────────────────────────
+  - {q: "dosai",                expect: dosa_plain,       category: romanised}
+  - {q: "thosai",               expect: dosa_plain,       category: romanised,
+     note: "trigram similarity to 'dosa' is 0.09 — this only works via phonetic folding"}
+  - {q: "dose",                 expect: dosa_plain,       category: romanised}
+  - {q: "masale dose",          expect: dosa_masala,      category: romanised}
+  - {q: "masala dosai",         expect: dosa_masala,      category: romanised}
+  - {q: "ulundhu vadai",        expect: vada_medu,        category: romanised}
+  - {q: "uddina vade",          expect: vada_medu,        category: romanised}
+  - {q: "garelu",               expect: vada_medu,        category: romanised,
+     note: "Telugu name shares no substring with 'vada' — needs the alias row"}
+  - {q: "thayir sadam",         expect: curd_rice,        category: romanised}
+  - {q: "mosaranna",            expect: curd_rice,        category: romanised}
+  - {q: "daddojanam",           expect: curd_rice,        category: romanised}
+  - {q: "perugannam",           expect: curd_rice,        category: romanised}
+  - {q: "puliyodarai",          expect: tamarind_rice,    category: romanised}
+  - {q: "pulihora",             expect: tamarind_rice,    category: romanised}
+  - {q: "puliyogare",           expect: tamarind_rice,    category: romanised}
+  - {q: "chitranna",            expect: lemon_rice,       category: romanised}
+  - {q: "uppittu",              expect: upma,             category: romanised}
+  - {q: "uppumavu",             expect: upma,             category: romanised}
+  - {q: "saaru",                expect: rasam,            category: romanised,
+     note: "Kannada for rasam — easily confused with sambar/sambaar"}
+  - {q: "huli",                 expect: sambar,           category: romanised,
+     note: "Kannada for sambar — short and collision-prone"}
+  - {q: "charu",                expect: rasam,            category: romanised}
+  - {q: "porotta",              expect: parotta,          category: romanised}
+  - {q: "neychoru",             expect: ghee_rice,        category: romanised}
+  - {q: "chammanthi",           expect: coconut_chutney,  category: romanised}
+  - {q: "chakkuli",             expect: murukku,          category: romanised}
+  - {q: "thenkuzhal",           expect: murukku,          category: romanised}
+  - {q: "kesari bath",          expect: rava_kesari,      category: romanised}
+  - {q: "chakkara pongali",     expect: sakkarai_pongal,  category: romanised}
+  - {q: "majjiga pulusu",       expect: mor_kuzhambu,     category: romanised}
+  - {q: "neyi roast",           expect: dosa_ghee_roast,  category: romanised}
+
+  # ── misspellings and typos ────────────────────────────────────────────────
+  - {q: "idly",                 expect: idli,             category: misspelling}
+  - {q: "iddly",                expect: idli,             category: misspelling}
+  - {q: "idlee",                expect: idli,             category: misspelling}
+  - {q: "dhosa",                expect: dosa_plain,       category: misspelling}
+  - {q: "dosey",                expect: dosa_plain,       category: misspelling}
+  - {q: "sambhar",              expect: sambar,           category: misspelling}
+  - {q: "saambar",              expect: sambar,           category: misspelling}
+  - {q: "biriyani",             expect: biryani_hyderabadi, category: misspelling}
+  - {q: "briyani",              expect: biryani_hyderabadi, category: misspelling}
+  - {q: "uthappam",            expect: uttapam,          category: misspelling}
+  - {q: "avial",                expect: aviyal,           category: misspelling}
+  - {q: "bisibelebath",         expect: bisi_bele_bath,   category: misspelling}
+  - {q: "mysore paak",          expect: mysore_pak,       category: misspelling}
+  - {q: "poori masala",         expect: poori,            category: misspelling}
+  - {q: "rawa dosa",            expect: dosa_rava,        category: misspelling}
+  - {q: "vadai",                expect: vada_medu,        category: misspelling}
+
+  # ── with quantities ───────────────────────────────────────────────────────
+  - {q: "2 idli",               expect: idli,             category: with_quantity}
+  - {q: "3 dosa",               expect: dosa_plain,       category: with_quantity}
+  - {q: "rendu idli",           expect: idli,             category: with_quantity}
+  - {q: "oru dosai",            expect: dosa_plain,       category: with_quantity}
+  - {q: "moonu vadai",          expect: vada_medu,        category: with_quantity}
+  - {q: "eradu masale dose",    expect: dosa_masala,      category: with_quantity}
+  - {q: "ondu idli",            expect: idli,             category: with_quantity}
+  - {q: "moodu appam",          expect: appam,            category: with_quantity}
+  - {q: "randu puttu",          expect: puttu,            category: with_quantity}
+  - {q: "ஒரு தோசை",             expect: dosa_plain,       category: with_quantity}
+  - {q: "1/2 plate biryani",    expect: biryani_hyderabadi, category: with_quantity}
+  - {q: "2 katori sambar",      expect: sambar,           category: with_quantity}
+  - {q: "half dosa",            expect: dosa_plain,       category: with_quantity}
+
+  # ── with modifiers (parameter hints) ──────────────────────────────────────
+  - {q: "dosa konjam ennai",    expect: dosa_plain,       category: with_modifier}
+  - {q: "masale dose swalpa enne", expect: dosa_masala,   category: with_modifier}
+  - {q: "2 dosa extra ghee",    expect: dosa_plain,       category: with_modifier}
+  - {q: "upma romba ennai",     expect: upma,             category: with_modifier}
+  - {q: "poori korachu enna",   expect: poori,            category: with_modifier}
+
+  # ── code-mixed and multi-item (first item is scored) ──────────────────────
+  - {q: "2 idli + sambar",      expect: idli,             category: code_mixed}
+  - {q: "3 idli and coconut chutney", expect: idli,       category: code_mixed}
+  - {q: "curd rice, konjam",    expect: curd_rice,        category: code_mixed}
+  - {q: "oru masala dosai + tea", expect: dosa_masala,    category: code_mixed}
+  - {q: "ven pongal with sambar", expect: pongal_ven,     category: code_mixed}
+
+  # ── colloquial / partial ──────────────────────────────────────────────────
+  - {q: "curd bath",            expect: curd_rice,        category: colloquial,
+     note: "Bangalore English for curd rice"}
+  - {q: "ghee roast",           expect: dosa_ghee_roast,  category: colloquial}
+  - {q: "set dose",             expect: dosa_set,         category: colloquial}
+  - {q: "kesari",               expect: rava_kesari,      category: colloquial}
+  - {q: "sweet pongal",         expect: sakkarai_pongal,  category: colloquial}
+  - {q: "string hopper",        expect: idiyappam,        category: colloquial}
+  - {q: "malabar parotta",      expect: parotta,          category: colloquial}
+  - {q: "fish curry",           expect: meen_curry,       category: colloquial}
+  - {q: "meen kulambu",         expect: meen_curry,       category: colloquial}
+  - {q: "gongura",              expect: gongura_pachadi,  category: colloquial}
+  - {q: "chicken chettinad",    expect: chettinad_chicken, category: colloquial}
+  - {q: "cabbage thoran",       expect: thoran,           category: colloquial}
+  - {q: "beans poriyal",        expect: poriyal,          category: colloquial}
+  - {q: "molaga bajji",         expect: bajji,            category: colloquial}
+  - {q: "mysore bonda",         expect: bonda,            category: colloquial}
+  - {q: "semiya payasam",       expect: payasam,          category: colloquial}
+
+  # ── genuinely ambiguous: the resolver SHOULD ask ──────────────────────────
+  - {q: "chutney",              expect: coconut_chutney,  accept: [tomato_chutney],
+     category: ambiguous, confirm: true,
+     note: "coconut is the default reading but tomato is a real alternative"}
+  - {q: "kuzhambu",             expect: kara_kuzhambu,
+     accept: [mor_kuzhambu, vatha_kuzhambu], category: ambiguous, confirm: true,
+     note: "three kuzhambu variants differ substantially in fat and sodium"}
+  - {q: "pongal",               expect: pongal_ven,       accept: [sakkarai_pongal],
+     category: ambiguous, confirm: true,
+     note: "savoury vs sweet — roughly 200 kcal apart per serving"}
+  - {q: "bath",                 expect: bisi_bele_bath,
+     accept: [vangi_bath, rava_kesari, curd_rice], category: ambiguous, confirm: true,
+     note: "Kannada suffix shared by many rice dishes"}
+  - {q: "rice",                 expect: null,             category: ambiguous, confirm: true,
+     note: "too generic to resolve to any single dish"}
+
+  # ── absent from the lexicon: must NOT invent a match ──────────────────────
+  - {q: "pizza",                expect: null,             category: absent, confirm: true}
+  - {q: "butter chicken",       expect: null,             category: absent, confirm: true}
+  - {q: "sushi",                expect: null,             category: absent, confirm: true}
+  - {q: "chole bhature",        expect: null,             category: absent, confirm: true}
+  - {q: "quantum widget",       expect: null,             category: absent, confirm: true}
+  - {q: "litti chokha",         expect: null,             category: absent, confirm: true}

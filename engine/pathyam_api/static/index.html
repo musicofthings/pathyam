@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pathyam AI — Gen-Z Light Pastel Nutrition & CGT Telemetry</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#FAF8F5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pathyam AI">
+<link rel="manifest" href="/manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+    });
+  }
+</script>
+<style>
+  :root {
+    --bg-canvas: #FAF8F5;
+    --bg-card: #FFFFFF;
+    --bg-input: #F3F0EA;
+    --border: #E8E2D8;
+    --border-accent: #C4B5FD;
+    
+    --text-primary: #1E1B26;
+    --text-secondary: #6E687A;
+    --text-muted: #9E96A9;
+    
+    --accent-lavender: #8B5CF6;
+    --accent-lavender-light: #F3E8FF;
+    --accent-lavender-glow: rgba(139, 92, 246, 0.15);
+    
+    --accent-mint: #10B981;
+    --accent-mint-light: #ECFDF5;
+    
+    --accent-coral: #FF6B57;
+    --accent-coral-light: #FFF0ED;
+    
+    --accent-honey: #F59E0B;
+    --accent-honey-light: #FEF3C7;
+    
+    --cgt-pink: #F43F5E;
+    --shadow-soft: 0 10px 30px rgba(139, 92, 246, 0.06);
+    --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.03);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    min-height: 100vh;
+    padding-bottom: 5rem;
+    line-height: 1.5;
+  }
+
+  /* Header */
+  header {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 100;
+    padding: 0.85rem 1.5rem;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .brand { display: flex; align-items: center; gap: 0.75rem; }
+  .brand-logo {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, #8B5CF6, #FF6B57);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; color: #fff; font-size: 1.15rem;
+    box-shadow: 0 4px 15px var(--accent-lavender-glow);
+  }
+  .brand-title { font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em; color: var(--text-primary); }
+  .brand-tag { font-size: 0.72rem; color: var(--accent-lavender); background: var(--accent-lavender-light); padding: 0.15rem 0.55rem; border-radius: 99px; font-weight: 700; }
+
+  /* Navigation Tabs Bar */
+  .nav-tabs {
+    display: flex; gap: 0.4rem; background: #EFEBE4; padding: 0.3rem; border-radius: 14px; border: 1px solid var(--border);
+  }
+  .nav-btn {
+    padding: 0.55rem 1rem; border: 0; border-radius: 10px;
+    background: transparent; color: var(--text-secondary); font-size: 0.88rem; font-weight: 600;
+    cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 0.4rem;
+  }
+  .nav-btn.active {
+    background: #FFFFFF; color: var(--accent-lavender); box-shadow: var(--shadow-card); font-weight: 700;
+  }
+
+  main { max-width: 920px; margin: 2rem auto; padding: 0 1.25rem; }
+
+  /* Notification Banner */
+  .toast {
+    position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
+    background: #FFFFFF; border: 1px solid var(--accent-mint); border-radius: 12px;
+    padding: 1rem 1.25rem; display: flex; align-items: center; gap: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1); transform: translateY(150%); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .toast.show { transform: translateY(0); }
+  .toast-icon { font-size: 1.4rem; }
+  .toast-title { font-weight: 700; font-size: 0.92rem; color: var(--text-primary); }
+  .toast-sub { font-size: 0.8rem; color: var(--text-secondary); }
+
+  /* Dashboard Cards */
+  .view-panel { display: none; }
+  .view-panel.active { display: block; }
+
+  .hero-card {
+    background: linear-gradient(135deg, #FFFFFF 0%, #F5F0FF 100%);
+    border: 1px solid var(--accent-lavender-light); border-radius: 20px;
+    padding: 1.75rem; margin-bottom: 1.5rem; box-shadow: var(--shadow-soft);
+  }
+  .hero-title { font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin-bottom: 0.25rem; }
+  .hero-sub { color: var(--text-secondary); font-size: 0.92rem; }
+
+  .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; }
+  @media (max-width: 700px) { .dashboard-grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px;
+    padding: 1.35rem 1.5rem; margin-bottom: 1.25rem; position: relative;
+    box-shadow: var(--shadow-soft); transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 12px 35px rgba(139, 92, 246, 0.09); }
+
+  .card-title { font-size: 1.05rem; font-weight: 700; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+
+  /* Progress Ring & Bars */
+  .ring-container { display: flex; align-items: center; gap: 1.5rem; }
+  .ring-stat { text-align: center; }
+  .ring-val { font-size: 2.2rem; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: var(--text-primary); }
+  .ring-lbl { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+
+  .progress-bar-wrap { margin-bottom: 0.75rem; }
+  .progress-lbl { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .progress-lbl span.val { font-family: 'Space Grotesk', sans-serif; }
+  .progress-bg { height: 10px; background: var(--bg-input); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 99px; transition: width 0.4s ease; }
+
+  /* Form & Perception Panel */
+  .input-panel {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px;
+    padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: var(--shadow-soft);
+  }
+
+  .camera-box { display: none; flex-direction: column; gap: 1rem; align-items: center; margin-bottom: 1.25rem; }
+  .camera-box.active { display: flex; }
+  .video-wrapper {
+    position: relative; width: 100%; max-width: 480px; height: 260px;
+    border-radius: 16px; overflow: hidden; background: #000; border: 2px dashed var(--accent-lavender);
+  }
+  video, canvas.preview-canvas { width: 100%; height: 100%; object-fit: cover; }
+  .cam-overlay { position: absolute; inset: 0; border: 2px solid var(--accent-lavender); border-radius: 14px; pointer-events: none; opacity: 0.6; }
+  .cam-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
+
+  .photo-presets { display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.5rem; margin-bottom: 1rem; }
+  .preset-chip {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem;
+    background: var(--accent-lavender-light); border: 1px solid var(--border-accent);
+    padding: 0.45rem 0.85rem; border-radius: 99px; font-size: 0.82rem; font-weight: 600;
+    color: var(--accent-lavender); cursor: pointer; transition: all 0.15s ease;
+  }
+  .preset-chip:hover { transform: scale(1.03); background: #E9D5FF; }
+
+  .search-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .search-input-wrap { position: relative; flex: 1; }
+  .search-input-wrap input { width: 100%; padding-right: 2.75rem; font-size: 1.05rem; }
+  .mic-btn { position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%); background: transparent; border: 0; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
+  @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+  
+  .input-group { display: flex; flex-direction: column; gap: 0.35rem; }
+  label { font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+
+  input[type=text], input[type=datetime-local], input[type=date], select {
+    width: 100%; padding: 0.75rem 1rem; font-size: 0.95rem;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--bg-input); color: var(--text-primary); font-family: inherit;
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+  input[type=text]:focus, select:focus { outline: none; border-color: var(--accent-lavender); background: #FFFFFF; box-shadow: 0 0 0 3px var(--accent-lavender-glow); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #8B5CF6, #7C4DFF);
+    color: #fff; border: 0; padding: 0.8rem 1.5rem; border-radius: 12px;
+    font-size: 0.95rem; font-weight: 700; cursor: pointer;
+    box-shadow: 0 4px 15px var(--accent-lavender-glow); transition: all 0.2s ease;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-lavender-glow); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .btn-secondary {
+    background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border);
+    padding: 0.65rem 1.15rem; border-radius: 10px; font-size: 0.88rem; font-weight: 600; cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-secondary:hover { border-color: var(--accent-lavender); background: #FFFFFF; }
+
+  .btn-danger {
+    background: var(--accent-coral-light); color: var(--accent-coral); border: 1px solid #FFC4BC;
+    padding: 0.4rem 0.85rem; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+  }
+  .btn-danger:hover { background: #FFE4E0; }
+
+  /* Monte Carlo & Nutrient Cards */
+  .kcal-display { font-size: 2.25rem; font-weight: 800; font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.03em; color: var(--text-primary); margin: 0.3rem 0 0.1rem; }
+  .ci-span { color: var(--text-muted); font-size: 0.92rem; font-weight: 400; font-family: 'Space Grotesk', monospace; }
+
+  .mc-bar { height: 8px; background: var(--bg-input); border-radius: 99px; position: relative; margin: 1rem 0 0.4rem; overflow: visible; }
+  .mc-bar span { position: absolute; height: 100%; background: linear-gradient(90deg, #8B5CF6, #FF6B57); opacity: 0.45; border-radius: 99px; }
+  .mc-bar i { position: absolute; width: 3px; height: 16px; top: -4px; background: var(--accent-lavender); border-radius: 2px; box-shadow: 0 0 6px var(--accent-lavender); }
+  .mc-labels { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted); font-family: 'Space Grotesk', monospace; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin-top: 1.25rem; font-size: 0.9rem; }
+  th { text-align: left; font-weight: 700; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+  td { padding: 0.5rem 0; border-top: 1px solid #F0EBE3; }
+  td.num { text-align: right; font-family: 'Space Grotesk', monospace; font-weight: 600; }
+
+  .confidence-tag { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 6px; font-size: 0.72rem; font-weight: 700; }
+  .confidence-tag.A, .confidence-tag.B { background: var(--accent-mint-light); color: var(--accent-mint); border: 1px solid #A7F3D0; }
+  .confidence-tag.C, .confidence-tag.D { background: var(--accent-honey-light); color: var(--accent-honey); border: 1px solid #FDE68A; }
+
+  /* Candidate Dish Buttons */
+  .cand-btn {
+    display: flex; justify-content: space-between; align-items: center; width: 100%;
+    background: #FFFFFF; color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 12px; margin: 0.55rem 0; padding: 0.85rem 1.15rem; font-size: 0.95rem; font-weight: 600;
+    cursor: pointer; transition: all 0.2s ease; box-shadow: var(--shadow-card);
+  }
+  .cand-btn:hover { border-color: var(--accent-lavender); background: var(--accent-lavender-light); transform: translateX(3px); }
+
+  /* CGT Canvas */
+  .cgt-box { background: #FFFFFF; border: 1px solid var(--border); border-radius: 16px; padding: 1.25rem; margin-top: 1.25rem; }
+  .cgt-title { font-size: 0.95rem; font-weight: 700; color: var(--cgt-pink); display: flex; align-items: center; justify-content: space-between; }
+  .cgt-metrics { font-size: 0.85rem; color: var(--text-secondary); font-family: 'Space Grotesk', monospace; margin: 0.5rem 0 0.75rem; }
+  .cgt-metrics b { color: var(--text-primary); }
+  canvas { width: 100%; height: 180px; display: block; border-radius: 10px; background: #FAFAFC; border: 1px solid #EAEAEF; }
+
+  .empty-state { text-align: center; color: var(--text-muted); padding: 2.5rem 1rem; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-logo">P</div>
+    <div>
+      <span class="brand-title">Pathyam AI</span>
+      <span class="brand-tag">v0.1.0</span>
+    </div>
+  </div>
+  <div class="nav-tabs">
+    <button class="nav-btn active" id="nav-dashboard" onclick="switchView('dashboard')">📊 Dashboard</button>
+    <button class="nav-btn" id="nav-log" onclick="switchView('log')">📸 Log Meal</button>
+    <button class="nav-btn" id="nav-history" onclick="switchView('history')">📜 History</button>
+    <button class="nav-btn" id="nav-cgt" onclick="switchView('cgt')">📈 CGT</button>
+    <button class="nav-btn" id="nav-recipes" onclick="switchView('recipes')">📖 Recipes</button>
+    <button class="nav-btn" id="nav-news" onclick="switchView('news')">📰 News Feed</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- 1. DASHBOARD VIEW -->
+  <div class="view-panel active" id="view-dashboard">
+    <div class="hero-card">
+      <div class="hero-title">Welcome back! 🌿</div>
+      <div class="hero-sub" id="dash-date">Today's Nutrition & Glycemic Summary</div>
+    </div>
+
+    <div class="dashboard-grid">
+      <!-- Energy Target Progress Ring Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>Daily Energy Target</span>
+          <span class="brand-tag">2,000 kcal Goal</span>
+        </div>
+        <div class="ring-container" style="margin-top:1rem;">
+          <div class="ring-stat">
+            <div class="ring-val" id="dash-consumed-kcal">0</div>
+            <div class="ring-lbl">Consumed</div>
+          </div>
+          <div style="flex:1;">
+            <div class="progress-bar-wrap">
+              <div class="progress-lbl"><span>Progress</span><span class="val" id="dash-pct-kcal">0%</span></div>
+              <div class="progress-bg"><div class="progress-fill" id="dash-fill-kcal" style="width:0%;background:linear-gradient(90deg, #8B5CF6, #FF6B57);"></div></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.82rem;color:var(--text-secondary);">
+              <span>Remaining: <b id="dash-remain-kcal">2000</b> kcal</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CGT Daily Spike Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>CGT Sensor Spike</span>
+          <span style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:99px;background:var(--accent-coral-light);color:var(--accent-coral);font-weight:700;">Patch Connected</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:0.75rem;margin-top:0.75rem;">
+          <div class="ring-val" id="dash-peak-glucose" style="color:var(--cgt-pink);">95</div>
+          <span style="font-size:0.95rem;color:var(--text-secondary);font-weight:600;">mg/dL Peak Spike</span>
+        </div>
+        <p style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;">Baseline: 95 mg/dL · Postprandial trajectory optimal</p>
+      </div>
+    </div>
+
+    <!-- Macronutrient Progress Grid -->
+    <div class="card">
+      <div class="card-title">Macronutrient Targets</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;">
+        <div class="progress-bar-wrap">
+          <div class="progress-lbl"><span>Protein</span><span class="val"><b id="dash-prot">0</b> / 75g</span></div>
+          <div class="progress-bg"><div class="progress-fill" id="dash-fill-prot" style="width:0%;background:#10B981;"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-lbl"><span>Carbohydrates</span><span class="val"><b id="dash-carbs">0</b> / 225g</span></div>
+          <div class="progress-bg"><div class="progress-fill" id="dash-fill-carbs" style="width:0%;background:#8B5CF6;"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-lbl"><span>Total Fat</span><span class="val"><b id="dash-fat">0</b> / 65g</span></div>
+          <div class="progress-bg"><div class="progress-fill" id="dash-fill-fat" style="width:0%;background:#FF6B57;"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-lbl"><span>Dietary Fibre</span><span class="val"><b id="dash-fibre">0</b> / 30g</span></div>
+          <div class="progress-bg"><div class="progress-fill" id="dash-fill-fibre" style="width:0%;background:#F59E0B;"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Meal Triggers -->
+    <div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;">
+      <button class="btn-primary" style="flex:1;" onclick="quickMealTrigger('breakfast')">🌅 Log Breakfast</button>
+      <button class="btn-primary" style="flex:1;" onclick="quickMealTrigger('lunch')">☀️ Log Lunch</button>
+      <button class="btn-primary" style="flex:1;" onclick="quickMealTrigger('dinner')">🌙 Log Dinner</button>
+    </div>
+
+    <!-- Recent Logs List -->
+    <div class="card">
+      <div class="card-title">
+        <span>Today's Meal Timeline</span>
+        <button class="btn-secondary" onclick="switchView('history')">View Full History →</button>
+      </div>
+      <div id="dash-timeline"><p class="empty-state">No meals logged today yet. Click Log Meal above!</p></div>
+    </div>
+  </div>
+
+
+  <!-- 2. LOG MEAL VIEW -->
+  <div class="view-panel" id="view-log">
+    <div class="input-panel">
+      <!-- Input Mode Switcher -->
+      <div style="display:flex;gap:0.5rem;margin-bottom:1.25rem;background:var(--bg-input);padding:0.25rem;border-radius:12px;">
+        <button class="btn-secondary" id="mode-text-btn" style="flex:1;border:0;background:#fff;" onclick="toggleLogMode('text')">💬 Text & Voice</button>
+        <button class="btn-secondary" id="mode-cam-btn" style="flex:1;border:0;background:transparent;" onclick="toggleLogMode('camera')">📸 Camera Photo</button>
+      </div>
+
+      <!-- Camera Stream Box -->
+      <div class="camera-box" id="camera-box">
+        <div class="video-wrapper">
+          <video id="video-stream" autoplay playsinline muted></video>
+          <canvas id="snapshot-canvas" class="preview-canvas" style="display:none;"></canvas>
+          <div class="cam-overlay"></div>
+        </div>
+        <div class="cam-controls">
+          <button class="btn-primary" onclick="snapPhoto()">📷 Snap Photo</button>
+          <button class="btn-secondary" onclick="toggleCameraFacing()">🔄 Flip Camera</button>
+          <input type="file" id="file-upload" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
+          <button class="btn-secondary" onclick="$('#file-upload').click()">📁 Upload Photo</button>
+        </div>
+      </div>
+
+      <!-- Photo Preset Chips -->
+      <div class="photo-presets">
+        <span style="font-size:0.78rem;color:var(--text-secondary);align-self:center;">Presets:</span>
+        <div class="preset-chip" onclick="quickSample('2 masala dosa konjam ennai', 113)">🥞 Masala Dosa Photo</div>
+        <div class="preset-chip" onclick="quickSample('3 idli sambar', 110)">⚪ Idli Plate Photo</div>
+        <div class="preset-chip" onclick="quickSample('2 medu vada', 114)">🍩 Medu Vada Photo</div>
+        <div class="preset-chip" onclick="quickSample('South Indian meals thali', 131)">🍛 Meals Thali Photo</div>
+      </div>
+
+      <!-- Meal Log Form -->
+      <form id="meal-form">
+        <div class="search-row">
+          <div class="search-input-wrap">
+            <input type="text" id="query-input" placeholder="e.g. 2 masale dose, swalpa enne OR 3 idli sambar" autocomplete="off" autofocus>
+            <button type="button" class="mic-btn" onclick="toggleVoiceInput()" title="Voice Speech Input">🎙️</button>
+          </div>
+          <button type="submit" class="btn-primary" id="btn-submit">Log Meal</button>
+        </div>
+
+        <div class="form-grid">
+          <div class="input-group">
+            <label>Meal Category</label>
+            <select id="meal_type">
+              <option value="breakfast">🌅 Breakfast</option>
+              <option value="morning_snack">🍎 Morning Snack</option>
+              <option value="lunch">☀️ Lunch</option>
+              <option value="evening_snack">☕ Evening Snack</option>
+              <option value="dinner">🌙 Dinner</option>
+              <option value="late_night_snack">🌌 Late Night Snack</option>
+              <option value="other">🍽️ Other</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label>Time Consumed</label>
+            <input type="datetime-local" id="consumed_at">
+          </div>
+
+          <div class="input-group">
+            <label>Regional Prior</label>
+            <select id="region_key">
+              <option value="">Default Regional Prior</option>
+              <option value="TN">Tamil Nadu (TN)</option>
+              <option value="KL">Kerala (KL)</option>
+              <option value="KA">Karnataka (KA)</option>
+              <option value="AP">Andhra Pradesh (AP)</option>
+              <option value="TG">Telangana (TG)</option>
+            </select>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Output Container -->
+    <div id="output-container"></div>
+  </div>
+
+
+  <!-- 3. HISTORY VIEW -->
+  <div class="view-panel" id="view-history">
+    <div class="card">
+      <div class="card-title">
+        <span>Meal History Journal</span>
+        <input type="date" id="history-date-picker" style="width:auto;padding:0.4rem 0.75rem;" onchange="loadHistoryDate(this.value)">
+      </div>
+      <div id="history-summary" style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:1rem;">Loading meal history journal…</div>
+    </div>
+    <div id="history-list"></div>
+  </div>
+
+
+  <!-- 4. CGT TELEMETRY VIEW -->
+  <div class="view-panel" id="view-cgt">
+    <div class="card">
+      <div class="card-title">
+        <span style="color:var(--cgt-pink);">📈 Continuous Glucose Sensor Telemetry</span>
+        <span class="brand-tag">Interstitial Patch Simulation</span>
+      </div>
+      <p style="font-size:0.92rem;color:var(--text-secondary);margin-bottom:1rem;">
+        Physiological postprandial glucose spike response simulation modeling Glycemic Load (GL), fat damping, and dietary fibre attenuation.
+      </p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;">
+        <div class="input-group">
+          <label>Carbohydrates (g)</label>
+          <input type="range" id="cgt-carbs" min="0" max="150" value="65" oninput="updateCGTSimulation()">
+          <span id="cgt-carbs-val" style="font-family:'Space Grotesk';font-weight:700;">65 g</span>
+        </div>
+        <div class="input-group">
+          <label>Dietary Fibre (g)</label>
+          <input type="range" id="cgt-fibre" min="0" max="30" value="6" oninput="updateCGTSimulation()">
+          <span id="cgt-fibre-val" style="font-family:'Space Grotesk';font-weight:700;">6 g</span>
+        </div>
+        <div class="input-group">
+          <label>Total Fat (g)</label>
+          <input type="range" id="cgt-fat" min="0" max="50" value="12" oninput="updateCGTSimulation()">
+          <span id="cgt-fat-val" style="font-family:'Space Grotesk';font-weight:700;">12 g</span>
+        </div>
+        <div class="input-group">
+          <label>Glycemic Index (GI)</label>
+          <input type="range" id="cgt-gi" min="20" max="100" value="68" oninput="updateCGTSimulation()">
+          <span id="cgt-gi-val" style="font-family:'Space Grotesk';font-weight:700;">68</span>
+        </div>
+      </div>
+
+      <div class="cgt-box">
+        <div class="cgt-metrics" id="cgt-sim-metrics">Computing physiological curve…</div>
+        <canvas id="cgtSimCanvas" width="700" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 5. RECIPES CATALOG VIEW -->
+  <div class="view-panel" id="view-recipes">
+    <div class="card">
+      <div class="card-title">
+        <span>📖 South Indian Recipe Template Catalog</span>
+        <span class="brand-tag">Parametric Engine</span>
+      </div>
+      <p style="font-size:0.92rem;color:var(--text-secondary);margin-bottom:1rem;">
+        Parametric recipe templates with typed distributions, IFCT 2017 clearance status, and computable ingredient bounds.
+      </p>
+      <div id="recipe-catalog-list">Loading recipe templates…</div>
+    </div>
+  </div>
+
+
+  <!-- 6. RSS NEWS FEED VIEW -->
+  <div class="view-panel" id="view-news">
+    <div class="card">
+      <div class="card-title">
+        <span style="color:var(--accent-lavender);">📰 Clinical Nutrition & CGT Research News</span>
+        <span class="brand-tag">Live RSS Feed</span>
+      </div>
+      <p style="font-size:0.92rem;color:var(--text-secondary);margin-bottom:1rem;">
+        Latest publications, clinical evidence, and research on South Indian nutrition, Glycemic Index, and Continuous Glucose Monitoring.
+      </p>
+      <div id="news-feed-list">Loading clinical news feed…</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Toast Notification -->
+<div class="toast" id="toast">
+  <div class="toast-icon">✨</div>
+  <div>
+    <div class="toast-title" id="toast-title">Meal Logged Successfully!</div>
+    <div class="toast-sub" id="toast-sub">Dashboard targets updated.</div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let activeStream = null;
+let currentFacing = 'environment';
+
+function initFormDefaults() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  
+  $('#consumed_at').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+  $('#history-date-picker').value = `${year}-${month}-${day}`;
+  $('#dash-date').textContent = d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+
+  const h = d.getHours();
+  if (h >= 5 && h < 11) $('#meal_type').value = 'breakfast';
+  else if (h >= 11 && h < 12.5) $('#meal_type').value = 'morning_snack';
+  else if (h >= 12.5 && h < 15.5) $('#meal_type').value = 'lunch';
+  else if (h >= 15.5 && h < 19) $('#meal_type').value = 'evening_snack';
+  else if (h >= 19 && h < 23) $('#meal_type').value = 'dinner';
+  else $('#meal_type').value = 'late_night_snack';
+}
+initFormDefaults();
+
+// Switch Navigation Tabs
+function switchView(viewName) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+
+  $(`#nav-${viewName}`).classList.add('active');
+  $(`#view-${viewName}`).classList.add('active');
+
+  if (viewName === 'dashboard') loadDashboardSummary();
+  if (viewName === 'history') loadHistoryDate($('#history-date-picker').value);
+  if (viewName === 'cgt') updateCGTSimulation();
+  if (viewName === 'recipes') loadRecipeCatalog();
+  if (viewName === 'news') loadNewsFeed();
+}
+
+function showToast(title, sub) {
+  $('#toast-title').textContent = title;
+  $('#toast-sub').textContent = sub;
+  $('#toast').classList.add('show');
+  setTimeout(() => $('#toast').classList.remove('show'), 3500);
+}
+
+function toggleLogMode(mode) {
+  if (mode === 'camera') {
+    $('#mode-cam-btn').style.background = '#fff';
+    $('#mode-text-btn').style.background = 'transparent';
+    $('#camera-box').classList.add('active');
+    startCamera();
+  } else {
+    $('#mode-text-btn').style.background = '#fff';
+    $('#mode-cam-btn').style.background = 'transparent';
+    $('#camera-box').classList.remove('active');
+    stopCamera();
+  }
+}
+
+async function startCamera() {
+  try {
+    if (activeStream) stopCamera();
+    activeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacing } });
+    $('#video-stream').srcObject = activeStream;
+    $('#video-stream').style.display = 'block';
+    $('#snapshot-canvas').style.display = 'none';
+  } catch (err) {
+    console.warn('Camera error:', err);
+  }
+}
+
+function stopCamera() {
+  if (activeStream) {
+    activeStream.getTracks().forEach(t => t.stop());
+    activeStream = null;
+  }
+}
+
+function toggleCameraFacing() {
+  currentFacing = currentFacing === 'user' ? 'environment' : 'user';
+  startCamera();
+}
+
+function snapPhoto() {
+  const video = $('#video-stream');
+  const canvas = $('#snapshot-canvas');
+  if (!video.srcObject) return;
+
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  video.style.display = 'none';
+  canvas.style.display = 'block';
+
+  analyzePhoto("Snapped Photo");
+}
+
+function handleFileUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('#query-input').value = file.name.replace(/\.[^/.]+$/, "");
+  analyzePhoto(file.name);
+}
+
+async function analyzePhoto(hintName) {
+  const text = $('#query-input').value.trim() || hintName;
+  try {
+    await fetch('/v1/perception/analyze', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_hint: text })
+    });
+  } catch(e) {}
+  logMeal({ text });
+}
+
+function quickSample(text, templateId) {
+  $('#query-input').value = text;
+  logMeal({ text, selected_template_id: templateId });
+}
+
+function quickMealTrigger(slot) {
+  $('#meal_type').value = slot;
+  switchView('log');
+  $('#query-input').focus();
+}
+
+function toggleVoiceInput() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    alert('Voice recognition not supported on this browser version.');
+    return;
+  }
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const rec = new SpeechRec();
+  rec.lang = 'en-IN';
+  rec.onstart = () => { $('.mic-btn').style.color = 'var(--accent-coral)'; };
+  rec.onresult = (e) => {
+    $('#query-input').value = e.results[0][0].transcript;
+    $('.mic-btn').style.color = 'var(--text-muted)';
+    logMeal({ text: $('#query-input').value });
+  };
+  rec.onerror = () => { $('.mic-btn').style.color = 'var(--text-muted)'; };
+  rec.start();
+}
+
+$('#meal-form').onsubmit = async e => {
+  e.preventDefault();
+  const text = $('#query-input').value.trim();
+  if (!text) return;
+  await logMeal({ text });
+};
+
+async function logMeal(payload) {
+  const textQuery = payload.text || $('#query-input').value.trim() || 'meal';
+  $('#btn-submit').disabled = true;
+  $('#output-container').innerHTML = '<p class="empty-state">Computing Monte Carlo sampling & CGT postprandial trajectory…</p>';
+
+  let consumedIso = new Date().toISOString();
+  if ($('#consumed_at').value) {
+    try {
+      const d = new Date($('#consumed_at').value);
+      if (!isNaN(d.getTime())) consumedIso = d.toISOString();
+    } catch(err) {}
+  }
+
+  try {
+    const body = {
+      text: textQuery,
+      n_samples: 3000,
+      meal_type: $('#meal_type').value || 'breakfast',
+      consumed_at: consumedIso
+    };
+    if (payload.selected_template_id) body.selected_template_id = Number(payload.selected_template_id);
+    if ($('#region_key').value) body.region_key = $('#region_key').value;
+
+    const r = await fetch('/v1/log', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const json = await r.json();
+
+    renderOutput(json, r.ok);
+    showToast("Meal Logged Successfully!", `Added ${textQuery} to daily journal.`);
+    
+    // Auto-update dashboard & transition after brief delay
+    setTimeout(() => { loadDashboardSummary(); switchView('dashboard'); }, 1200);
+  } catch (err) {
+    $('#output-container').innerHTML = `<div class="card"><span style="color:var(--accent-coral)">Error: ${esc(err.message || err)}</span></div>`;
+  }
+  $('#btn-submit').disabled = false;
+}
+
+function renderOutput(data, ok) {
+  if (!ok) {
+    $('#output-container').innerHTML = `<div class="card"><span style="color:var(--accent-coral)">${esc(data.detail || 'Service error')}</span></div>`;
+    return;
+  }
+  if (!data.items?.length) {
+    $('#output-container').innerHTML = '<div class="card empty-state">Nothing parsed from that query.</div>';
+    return;
+  }
+  let html = data.items.map(item => item.computed ? renderComputedCard(item, data) : renderUnresolvedCard(item, data)).join('');
+  $('#output-container').innerHTML = html;
+  wireAskButtons(data);
+  wireCandidateButtons();
+  fetchAndRenderCGT(data);
+}
+
+function renderComputedCard(item, data) {
+  const c = item.computed, e = c.nutrients.ENERC_KCAL?.per_serving;
+  const p = item.resolution.parsed;
+  const lo = e ? e.p10 : 0, mid = e ? e.p50 : 0, hi = e ? e.p90 : 0;
+  const span = hi - lo || 1;
+
+  const nutrientsTable = Object.values(c.nutrients)
+    .filter(n => ['ENERC_KCAL','PROCNT','FAT','CHOAVLDF','FIBTG','NA','K','FE'].includes(n.tagname))
+    .map(n => `<tr>
+        <td>${esc(n.name)}</td>
+        <td class="num">${n.per_serving.p50.toFixed(n.unit === 'kcal' ? 0 : 1)}</td>
+        <td class="num ci-span">${n.per_serving.p10.toFixed(n.unit==='kcal'?0:1)}–${n.per_serving.p90.toFixed(n.unit==='kcal'?0:1)}</td>
+        <td class="num ci-span">${esc(n.unit)}</td>
+        <td class="num"><span class="confidence-tag ${n.worst_confidence}">${n.worst_confidence}</span></td>
+      </tr>`).join('');
+
+  const dom = c.dominant_uncertainty_param;
+  const share = dom ? Math.round((c.variance_contributions[dom] || 0) * 100) : 0;
+  const param = dom ? c.parameter_summary[dom] : null;
+
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div><div class="card-title" style="margin:0;">${esc(c.food_name)} <span class="ci-span">× ${c.portions || c.servings}</span></div></div>
+      <span class="brand-tag">${esc(data.meal_type || 'meal')}</span>
+    </div>
+
+    <p class="kcal-display">${Math.round(mid)} <span class="ci-span">kcal (${Math.round(lo)}–${Math.round(hi)}, 80% CI)</span></p>
+    
+    <div class="mc-bar"><span style="left:0;width:100%"></span><i style="left:${((mid-lo)/span)*100}%"></i></div>
+    <div class="mc-labels"><span>p10: ${Math.round(lo)}</span><span>p50: ${Math.round(mid)}</span><span>p90: ${Math.round(hi)}</span></div>
+
+    <table>
+      <thead><tr><th>Nutrient</th><th class="num">Median</th><th class="num">80% CI</th><th></th><th class="num">Tier</th></tr></thead>
+      <tbody>${nutrientsTable}</tbody>
+    </table>
+
+    ${dom ? `<div style="background:var(--accent-lavender-light);border:1px solid var(--border-accent);border-radius:12px;padding:1rem;margin-top:1rem;">
+        <p style="font-size:0.9rem;margin-bottom:0.5rem;"><b>${share}%</b> of energy uncertainty is <code>${esc(dom)}</code>${param && param.p50 ? ` (~${Number(param.p50).toFixed(1)} g)` : ''}:</p>
+        <div style="display:flex;gap:0.5rem;">
+          <button class="btn-secondary opt-btn" data-scale="0.6" data-param="${esc(dom)}" data-template="${esc(c.template)}">Little</button>
+          <button class="btn-secondary opt-btn" data-scale="1.0" data-param="${esc(dom)}" data-template="${esc(c.template)}">Usual</button>
+          <button class="btn-secondary opt-btn" data-scale="1.6" data-param="${esc(dom)}" data-template="${esc(c.template)}">Generous</button>
+        </div>
+      </div>` : ''}
+
+    <div class="cgt-box">
+      <div class="cgt-title">
+        <span>📈 CGT Postprandial Glucose Response</span>
+        <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400;">Continuous Glucose Patch</span>
+      </div>
+      <div class="cgt-metrics" id="cgt-metrics">Computing glycemic curve…</div>
+      <canvas id="cgtCanvas" width="700" height="170"></canvas>
+    </div>
+  </div>`;
+}
+
+function renderUnresolvedCard(item, data) {
+  const r = item.resolution, p = r.parsed;
+  const cands = r.candidates.map(c =>
+    `<button class="cand-btn" data-template="${esc(c.template_id ?? '')}" data-name="${esc(c.name_en)}">
+       <span>Accept <b>${esc(c.name_en)}</b></span>
+       <span style="font-size:0.8rem;color:var(--accent-lavender);font-weight:700;">${esc(c.method)} (${(c.score*100).toFixed(0)}%) → Click to Log</span>
+     </button>`).join('');
+
+  return `<div class="card" style="border-left:4px solid var(--accent-honey);">
+    <div class="card-title">“${esc(p.dish_phrase || p.raw_text)}”</div>
+    <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:0.75rem;">${esc(item.skipped_reason || 'Confirmation required')}.</p>
+    ${cands ? `<p style="font-size:0.82rem;color:var(--text-secondary);font-weight:700;margin-bottom:0.4rem;">Select Matched Dish Candidate:</p>${cands}` : ''}
+  </div>`;
+}
+
+function wireAskButtons(data) {
+  document.querySelectorAll('.opt-btn').forEach(btn => btn.onclick = async () => {
+    const body = {
+      template: btn.dataset.template, n_samples: 3000,
+      param_scales: { [btn.dataset.param]: Number(btn.dataset.scale) }
+    };
+    if ($('#region_key').value) body.region_key = $('#region_key').value;
+    btn.disabled = true;
+    const r = await fetch('/v1/compute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const c = await r.json();
+    if (r.ok) $('#output-container').innerHTML = renderComputedCard({ computed: c, resolution: { parsed: { dish_phrase: c.food_name, parameter_hints: {} }, candidates: [{method:'refined'}], confidence: 1 } }, data);
+  });
+}
+
+function wireCandidateButtons() {
+  document.querySelectorAll('.cand-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const templateId = btn.dataset.template;
+      const dishName = btn.dataset.name || 'meal';
+      if (templateId) await logMeal({ text: dishName, selected_template_id: Number(templateId) });
+    };
+  });
+}
+
+async function fetchAndRenderCGT(data) {
+  const canvas = document.getElementById('cgtCanvas');
+  const metricsEl = document.getElementById('cgt-metrics');
+  if (!canvas || !metricsEl) return;
+
+  const item = data.items?.find(i => i.computed);
+  let carbs = 45.0, fibre = 5.0, fat = 10.0, servings = 1.0;
+  if (item?.computed?.nutrients) {
+    const n = item.computed.nutrients;
+    carbs = n.CHOAVLDF?.per_serving?.p50 ?? 45.0;
+    fibre = n.FIBTG?.per_serving?.p50 ?? 5.0;
+    fat = n.FAT?.per_serving?.p50 ?? 10.0;
+    servings = item.computed.portions || 1.0;
+  }
+
+  try {
+    const r = await fetch('/v1/cgt/predict_spike', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ carbs_g: carbs, fibre_g: fibre, fat_g: fat, servings: servings, baseline_mg_dl: 95.0 })
+    });
+    const cgt = await r.json();
+
+    metricsEl.innerHTML = `Peak: <b>${cgt.peak_mg_dl} mg/dL</b> (+${Math.round(cgt.peak_mg_dl - cgt.baseline_mg_dl)} mg/dL at t=${cgt.time_to_peak_min}m) · ` +
+                          `Glycemic Load: <b>${cgt.glycemic_load}</b> · ` +
+                          `iAUC: <b>${Math.round(cgt.iauc_mg_dl_min)}</b> mg/dL·min`;
+
+    drawCGTGraphCanvas(canvas, cgt);
+  } catch (err) {}
+}
+
+function drawCGTGraphCanvas(canvas, cgt) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const pts = cgt.curve;
+  if (!pts || !pts.length) return;
+
+  const minG = 80, maxG = Math.max(160, cgt.peak_mg_dl + 20);
+  const getX = t => 45 + (t / 180.0) * (w - 65);
+  const getY = g => h - 25 - ((g - minG) / (maxG - minG)) * (h - 40);
+
+  // Baseline line
+  ctx.strokeStyle = '#E2E8F0';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(getX(0), getY(cgt.baseline_mg_dl));
+  ctx.lineTo(getX(180), getY(cgt.baseline_mg_dl));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Fill area under curve
+  ctx.fillStyle = 'rgba(244, 63, 94, 0.12)';
+  ctx.beginPath();
+  ctx.moveTo(getX(0), getY(cgt.baseline_mg_dl));
+  pts.forEach(p => ctx.lineTo(getX(p.time_minutes), getY(p.glucose_mg_dl)));
+  ctx.lineTo(getX(180), getY(cgt.baseline_mg_dl));
+  ctx.closePath();
+  ctx.fill();
+
+  // Curve Line
+  ctx.strokeStyle = '#F43F5E';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  pts.forEach((p, idx) => {
+    if (idx === 0) ctx.moveTo(getX(p.time_minutes), getY(p.glucose_mg_dl));
+    else ctx.lineTo(getX(p.time_minutes), getY(p.glucose_mg_dl));
+  });
+  ctx.stroke();
+
+  // Peak marker
+  const peakPt = pts.reduce((prev, curr) => (curr.glucose_mg_dl > prev.glucose_mg_dl ? curr : prev), pts[0]);
+  const px = getX(peakPt.time_minutes), py = getY(peakPt.glucose_mg_dl);
+  ctx.fillStyle = '#F43F5E';
+  ctx.beginPath();
+  ctx.arc(px, py, 5, 0, 2 * Math.PI);
+  ctx.fill();
+
+  // Labels
+  ctx.fillStyle = '#9E96A9';
+  ctx.font = '11px Plus Jakarta Sans, sans-serif';
+  ctx.fillText('0m', getX(0) - 8, h - 8);
+  ctx.fillText('60m', getX(60) - 10, h - 8);
+  ctx.fillText('120m', getX(120) - 12, h - 8);
+  ctx.fillText('180m', getX(180) - 15, h - 8);
+  ctx.fillText(`${Math.round(cgt.baseline_mg_dl)}`, 8, getY(cgt.baseline_mg_dl) + 4);
+  ctx.fillText(`${Math.round(cgt.peak_mg_dl)}`, 8, py + 4);
+}
+
+// DASHBOARD SUMMARY API
+async function loadDashboardSummary() {
+  try {
+    const r = await fetch('/v1/dashboard/summary');
+    const d = await r.json();
+
+    $('#dash-consumed-kcal').textContent = Math.round(d.consumed_kcal);
+    $('#dash-remain-kcal').textContent = Math.round(d.remaining_kcal);
+
+    const pct = Math.min(100, Math.round((d.consumed_kcal / d.target_kcal) * 100));
+    $('#dash-pct-kcal').textContent = `${pct}%`;
+    $('#dash-fill-kcal').style.width = `${pct}%`;
+
+    $('#dash-prot').textContent = Math.round(d.protein_g);
+    $('#dash-fill-prot').style.width = `${Math.min(100, (d.protein_g / d.target_protein_g) * 100)}%`;
+
+    $('#dash-carbs').textContent = Math.round(d.carbs_g);
+    $('#dash-fill-carbs').style.width = `${Math.min(100, (d.carbs_g / d.target_carbs_g) * 100)}%`;
+
+    $('#dash-fat').textContent = Math.round(d.fat_g);
+    $('#dash-fill-fat').style.width = `${Math.min(100, (d.fat_g / d.target_fat_g) * 100)}%`;
+
+    $('#dash-fibre').textContent = Math.round(d.fibre_g);
+    $('#dash-fill-fibre').style.width = `${Math.min(100, (d.fibre_g / d.target_fibre_g) * 100)}%`;
+
+    $('#dash-peak-glucose').textContent = Math.round(d.daily_peak_glucose_mg_dl);
+
+    if (d.recent_entries?.length) {
+      $('#dash-timeline').innerHTML = d.recent_entries.map(e => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-bottom:1px solid #F0EBE3;flex-wrap:wrap;gap:0.5rem;">
+          <div>
+            <div style="font-weight:700;color:var(--text-primary);">${esc(e.query_text)}</div>
+            <div style="font-size:0.8rem;color:var(--text-secondary);">${esc(e.meal_type)} · ${new Date(e.consumed_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.6rem;">
+            <div style="display:flex;align-items:center;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:0.15rem 0.35rem;gap:0.3rem;">
+              <button class="btn-secondary" style="padding:0.1rem 0.4rem;font-size:0.8rem;border:0;background:transparent;" onclick="updatePortion('${e.id}', -1)">➖</button>
+              <span style="font-family:'Space Grotesk';font-weight:800;font-size:0.85rem;color:var(--accent-lavender);">${e.items?.[0]?.computed?.portions || 1}x</span>
+              <button class="btn-secondary" style="padding:0.1rem 0.4rem;font-size:0.8rem;border:0;background:transparent;" onclick="updatePortion('${e.id}', 1)">➕</button>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-family:'Space Grotesk';font-weight:800;color:var(--accent-lavender);">${Math.round(e.total_kcal)} kcal</div>
+            </div>
+            <button class="btn-danger" style="padding:0.25rem 0.5rem;" onclick="deleteEntry('${e.id}')" title="Delete specific entry">🗑️</button>
+          </div>
+        </div>`).join('');
+    } else {
+      $('#dash-timeline').innerHTML = '<p class="empty-state">No meals logged today yet.</p>';
+    }
+  } catch (err) {}
+}
+
+// HISTORY JOURNAL API
+async function loadHistoryDate(dateStr) {
+  try {
+    const r = await fetch(`/v1/history?date=${dateStr}`);
+    const d = await r.json();
+
+    $('#history-summary').innerHTML = `Date: <b>${d.date}</b> · Meals: <b>${d.count}</b> · Total Calories: <b>${Math.round(d.total_kcal)} kcal</b> (P: ${Math.round(d.total_protein_g)}g, C: ${Math.round(d.total_carbs_g)}g, F: ${Math.round(d.total_fat_g)}g, Fibre: ${Math.round(d.total_fibre_g)}g)`;
+
+    if (!d.entries?.length) {
+      $('#history-list').innerHTML = '<div class="card empty-state">No journal entries logged for this date.</div>';
+      return;
+    }
+
+    $('#history-list').innerHTML = d.entries.map(e => `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.75rem;">
+          <div>
+            <div class="card-title" style="margin:0;">${esc(e.query_text)}</div>
+            <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:0.2rem;">${esc(e.meal_type)} · ${new Date(e.consumed_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+          
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <div style="display:flex;align-items:center;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:0.2rem 0.4rem;gap:0.4rem;">
+              <button class="btn-secondary" style="padding:0.2rem 0.5rem;font-size:0.9rem;border:0;background:transparent;" title="Decrease Portion" onclick="updatePortion('${e.id}', -1)">➖</button>
+              <span style="font-family:'Space Grotesk';font-weight:800;font-size:0.92rem;color:var(--accent-lavender);">${e.items?.[0]?.computed?.portions || 1}x</span>
+              <button class="btn-secondary" style="padding:0.2rem 0.5rem;font-size:0.9rem;border:0;background:transparent;" title="Increase Portion" onclick="updatePortion('${e.id}', 1)">➕</button>
+            </div>
+            <button class="btn-danger" onclick="deleteEntry('${e.id}')" title="Delete specific entry">🗑️ Delete Entry</button>
+          </div>
+        </div>
+        <div class="kcal-display">${Math.round(e.total_kcal)} <span class="ci-span">kcal</span></div>
+        <div style="display:flex;gap:1.5rem;font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;flex-wrap:wrap;">
+          <span>Protein: <b>${e.protein_g}g</b></span>
+          <span>Carbs: <b>${e.carbs_g}g</b></span>
+          <span>Fat: <b>${e.fat_g}g</b></span>
+          <span>Fibre: <b>${e.fibre_g}g</b></span>
+          <span>Peak Glucose: <b style="color:var(--cgt-pink);">${e.peak_glucose_mg_dl} mg/dL</b></span>
+        </div>
+      </div>`).join('');
+  } catch (err) {}
+}
+
+async function updatePortion(entryId, delta) {
+  try {
+    const r = await fetch(`/v1/history/${entryId}/portion`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ delta: delta })
+    });
+    if (r.ok) {
+      showToast("Portion Updated", `Adjusted meal portion count (${delta > 0 ? '+1' : '-1'})`);
+      loadHistoryDate($('#history-date-picker').value);
+      loadDashboardSummary();
+    }
+  } catch (err) {}
+}
+
+async function deleteEntry(entryId) {
+  if (!confirm("Delete this specific meal log entry?")) return;
+  try {
+    const r = await fetch(`/v1/history/${entryId}`, { method: 'DELETE' });
+    if (r.ok) {
+      showToast("Entry Deleted", "Target meal log removed.");
+      loadHistoryDate($('#history-date-picker').value);
+      loadDashboardSummary();
+    }
+  } catch(err) {}
+}
+
+// CGT SIMULATION SLIDERS
+async function updateCGTSimulation() {
+  const carbs = Number($('#cgt-carbs').value);
+  const fibre = Number($('#cgt-fibre').value);
+  const fat = Number($('#cgt-fat').value);
+  const gi = Number($('#cgt-gi').value);
+
+  $('#cgt-carbs-val').textContent = `${carbs} g`;
+  $('#cgt-fibre-val').textContent = `${fibre} g`;
+  $('#cgt-fat-val').textContent = `${fat} g`;
+  $('#cgt-gi-val').textContent = `${gi}`;
+
+  const canvas = document.getElementById('cgtSimCanvas');
+  const metricsEl = document.getElementById('cgt-sim-metrics');
+  if (!canvas || !metricsEl) return;
+
+  try {
+    const r = await fetch('/v1/cgt/predict_spike', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ carbs_g: carbs, fibre_g: fibre, fat_g: fat, gi: gi, baseline_mg_dl: 95.0 })
+    });
+    const cgt = await r.json();
+
+    metricsEl.innerHTML = `Peak Spike: <b>${cgt.peak_mg_dl} mg/dL</b> (+${Math.round(cgt.peak_mg_dl - cgt.baseline_mg_dl)} mg/dL at t=${cgt.time_to_peak_min}m) · ` +
+                          `Glycemic Load: <b>${cgt.glycemic_load}</b> · ` +
+                          `iAUC: <b>${Math.round(cgt.iauc_mg_dl_min)}</b> mg/dL·min`;
+
+    drawCGTGraphCanvas(canvas, cgt);
+  } catch (err) {}
+}
+
+// RECIPE CATALOG API
+async function loadRecipeCatalog() {
+  try {
+    const r = await fetch('/v1/templates');
+    const templates = await r.json();
+
+    $('#recipe-catalog-list').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;">
+        <div style="background:var(--accent-lavender-light);padding:1rem;border-radius:14px;border:1px solid var(--border-accent);">
+          <div style="font-size:0.8rem;font-weight:700;color:var(--accent-lavender);text-transform:uppercase;">Active Templates</div>
+          <div style="font-size:1.8rem;font-weight:800;font-family:'Space Grotesk';color:var(--text-primary);">${templates.length} Recipe Templates</div>
+        </div>
+        <div style="background:var(--accent-mint-light);padding:1rem;border-radius:14px;border:1px solid #A7F3D0;">
+          <div style="font-size:0.8rem;font-weight:700;color:var(--accent-mint);text-transform:uppercase;">Computable Audit</div>
+          <div style="font-size:1.8rem;font-weight:800;font-family:'Space Grotesk';color:var(--text-primary);">${templates.filter(t=>t.is_computable).length} Active Computable</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;">` +
+      templates.map(t => `
+        <div class="card" style="margin-bottom:0;border-left:4px solid ${t.is_computable ? 'var(--accent-mint)' : 'var(--accent-honey)'};">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div>
+              <div style="font-weight:800;font-size:1.1rem;color:var(--text-primary);">${esc(t.name_en)}</div>
+              <div style="font-size:0.78rem;font-family:'Space Grotesk';color:var(--text-muted);">${esc(t.pathyam_id)} · ${esc(t.base_method)}</div>
+            </div>
+            <span class="confidence-tag ${t.is_computable ? 'A' : 'C'}">${t.is_computable ? 'COMPUTABLE' : 'BLOCKED'}</span>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;margin:0.85rem 0 0.5rem;font-size:0.88rem;">
+            <span>Calories: <b style="font-family:'Space Grotesk';">${t.kcal_per_serving} kcal/serv</b></span>
+            <span>Density: <b style="font-family:'Space Grotesk';">${t.kcal_per_100g} kcal/100g</b></span>
+          </div>
+
+          <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.75rem;">
+            Dominant Parameter: <code>${esc(t.dominant_param || 'none')}</code>
+            <br>Parameters: <b>${t.parameters_count}</b> · Ingredients: <b>${t.ingredients_count}</b>
+            ${t.missing_ingredients_count > 0 ? `<br><span style="color:var(--accent-coral)">Missing IFCT Data: ${t.missing_ingredients_count} item(s)</span>` : ''}
+          </div>
+
+          <button class="btn-primary" style="width:100%;padding:0.45rem;font-size:0.85rem;" onclick="quickSample('${esc(t.name_en)}', ${t.template_id})">Log ${esc(t.name_en)}</button>
+        </div>`).join('') + `</div>`;
+  } catch(err) {
+    $('#recipe-catalog-list').innerHTML = '<p class="empty-state">Failed to load recipe templates.</p>';
+  }
+}
+
+// RSS NEWS FEED API
+async function loadNewsFeed() {
+  try {
+    const r = await fetch('/v1/news/rss');
+    const feed = await r.json();
+
+    $('#news-feed-list').innerHTML = feed.articles.map(a => `
+      <div class="card" style="border-left:4px solid var(--accent-lavender);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+          <span class="brand-tag">${esc(a.category)}</span>
+          <span style="font-size:0.8rem;color:var(--text-muted);font-family:'Space Grotesk';">${esc(a.published_at)}</span>
+        </div>
+        <div style="font-weight:800;font-size:1.15rem;color:var(--text-primary);margin-bottom:0.35rem;">${esc(a.title)}</div>
+        <div style="font-size:0.82rem;font-weight:700;color:var(--accent-lavender);margin-bottom:0.6rem;">Source: ${esc(a.source)}</div>
+        <p style="font-size:0.9rem;color:var(--text-secondary);line-height:1.55;margin-bottom:0.85rem;">${esc(a.summary)}</p>
+        <a href="${esc(a.link)}" target="_blank" class="btn-secondary" style="display:inline-block;text-decoration:none;font-size:0.82rem;padding:0.4rem 0.85rem;">Read Full Research Article →</a>
+      </div>`).join('');
+  } catch(err) {
+    $('#news-feed-list').innerHTML = '<p class="empty-state">Failed to load RSS news feed.</p>';
+  }
+}
+
+// Initial Load
+loadDashboardSummary();
+</script>
+</body>
+</html>

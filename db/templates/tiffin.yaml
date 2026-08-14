@@ -1,0 +1,283 @@
+# Pathyam — parametric recipe templates: tiffin and breakfast
+#
+# Authoring guide
+# ───────────────
+# A template is a dish FAMILY, not a recipe. Parameters carry distributions, so one
+# template covers every regional and household variation of the dish. A specific
+# masala dosa is a parameter binding, not a new row.
+#
+#   parameters:  name: {dist, <dist params>, unit, observable, ask, options}
+#                dists: point | normal | lognormal | uniform | categorical | beta
+#                lognormal mu/sigma describe ln(X), so median = exp(mu)
+#                `observable: true` means a vision model can plausibly see it
+#                `ask` is the elicitation question when this parameter dominates variance
+#
+#   ingredients: {food | sub_template, qty, prep, method, optional}
+#                qty is arithmetic over this template's declared parameters
+#                a sub_template's qty is a TARGET MASS of that sub-recipe
+#
+#   regional:    per-state prior overrides. "Kerala" is a shifted prior, not new rows.
+#
+# ⚠ QUANTITIES ARE ON A DRY-SOLIDS BASIS.
+#
+# `solids_g` is the DRY weight of rice, dal and flour — never the wet batter. IFCT
+# reports composition per dry weight, so entering wet batter mass and valuing it
+# against dry-weight composition overstates a fermented dish by 2.5-3x. That bug
+# shipped in the original seed data and went unnoticed until the audit's energy-band
+# check flagged idli at 317 kcal/100 g against a real value near 110.
+#
+# `yield_factor` is therefore cooked mass / dry raw mass, and is usually well ABOVE 1
+# for anything steamed or simmered.
+#
+# Quantities are best-effort estimates from domestic practice and need review by a
+# dietitian. They are parameters of a model, not measurements.
+
+templates:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000110
+    dish: idli
+    method: steamed
+    servings: 4
+    # Yields are relative to DRY SOLIDS, because that is the basis IFCT reports on.
+    # Idli: ~63 g dry rice+dal -> ~180 g of four steamed idli.
+    yield_factor: 2.83
+    notes: >
+      One batch = 4 idli. solids_g is DRY rice + dal, not wet batter — see the
+      note at the top of this file. Fermented 8-16 h; fermentation alters B12,
+      folate and phytate in ways IFCT's raw values do not capture (dossier, Tier 4).
+    parameters:
+      solids_g:       {dist: lognormal, mu: 4.14, sigma: 0.18, unit: g, observable: true}
+      rice_fraction:  {dist: normal, mu: 0.72, sigma: 0.04, unit: ratio}
+      rice_type:      {dist: categorical, categories: [parboiled, raw], weights: [0.85, 0.15]}
+      fermentation_h: {dist: normal, mu: 12, sigma: 3, unit: h}
+    ingredients:
+      - {food: rice_parboiled, qty: 'solids_g * rice_fraction * (rice_type == "parboiled")', prep: soaked_ground, method: steamed}
+      - {food: rice_raw,       qty: 'solids_g * rice_fraction * (rice_type == "raw")',       prep: soaked_ground, method: steamed}
+      - {food: urad_dal,       qty: 'solids_g * (1 - rice_fraction) * 0.96', prep: soaked_ground, method: steamed}
+      - {food: fenugreek_seed, qty: 'solids_g * (1 - rice_fraction) * 0.04', prep: soaked_ground, method: steamed}
+      - {food: salt,           qty: 'solids_g * 0.010'}
+    regional:
+      KL: {rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.95, 0.05]}}
+      KA: {rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.60, 0.40]}}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000111
+    dish: dosa_plain
+    method: griddled
+    servings: 1
+    yield_factor: 1.79
+    notes: Rice:urad roughly 3:1 dry weight, fermented 8-16 h.
+    parameters:
+      solids_g:  {dist: lognormal, mu: 3.43, sigma: 0.25, unit: g, observable: true}
+      rice_fraction: {dist: normal, mu: 0.75, sigma: 0.04, unit: ratio}
+      fat_g:     {dist: lognormal, mu: 2.08, sigma: 0.55, unit: g,
+                  ask: "How much oil or ghee was used?",
+                  options: [{label: little, value: 4}, {label: medium, value: 8}, {label: generous, value: 15}]}
+      fat_type:  {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.45, 0.30, 0.15, 0.10]}
+      rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.70, 0.30]}
+    ingredients:
+      - {food: rice_parboiled, qty: 'solids_g * rice_fraction * (rice_type == "parboiled")', prep: soaked_ground, method: griddled}
+      - {food: rice_raw,       qty: 'solids_g * rice_fraction * (rice_type == "raw")',       prep: soaked_ground, method: griddled}
+      - {food: urad_dal,       qty: 'solids_g * (1 - rice_fraction) * 0.95', prep: soaked_ground, method: griddled}
+      - {food: fenugreek_seed, qty: 'solids_g * (1 - rice_fraction) * 0.05', prep: soaked_ground, method: griddled}
+      - {food: gingelly_oil,   qty: 'fat_g * (fat_type == "gingelly")'}
+      - {food: coconut_oil,    qty: 'fat_g * (fat_type == "coconut")'}
+      - {food: ghee,           qty: 'fat_g * (fat_type == "ghee")'}
+      - {food: sunflower_oil,  qty: 'fat_g * (fat_type == "sunflower")'}
+      - {food: salt,           qty: 'solids_g * 0.012'}
+    regional:
+      KL: {fat_type: {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.10, 0.75, 0.10, 0.05]},
+           rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.92, 0.08]}}
+      TN: {fat_type: {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.60, 0.15, 0.15, 0.10]},
+           rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.80, 0.20]}}
+      KA: {fat_type: {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.25, 0.15, 0.30, 0.30]},
+           rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.45, 0.55]}}
+      AP: {fat_type: {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.30, 0.10, 0.15, 0.45]}}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000112
+    dish: potato_masala
+    method: boiled
+    servings: 1
+    yield_factor: 0.95
+    notes: Sub-recipe. Referenced by masala dosa and poori masala.
+    parameters:
+      potato_g:     {dist: lognormal, mu: 4.25, sigma: 0.30, unit: g, observable: true}
+      onion_g:      {dist: lognormal, mu: 3.00, sigma: 0.35, unit: g, observable: true}
+      masala_fat_g: {dist: lognormal, mu: 1.61, sigma: 0.45, unit: g}
+    ingredients:
+      - {food: potato,        qty: 'potato_g', prep: boiled, method: boiled}
+      - {food: onion,         qty: 'onion_g', prep: sliced, method: sauteed}
+      - {food: gingelly_oil,  qty: 'masala_fat_g'}
+      - {food: green_chilli,  qty: '(potato_g + onion_g) * 0.02'}
+      - {food: turmeric,      qty: '(potato_g + onion_g) * 0.004'}
+      - {food: mustard_seed,  qty: '(potato_g + onion_g) * 0.004'}
+      - {food: curry_leaf,    qty: '(potato_g + onion_g) * 0.008'}
+      - {food: salt,          qty: '(potato_g + onion_g) * 0.010'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000113
+    dish: dosa_masala
+    method: griddled
+    servings: 1
+    yield_factor: 1.40
+    notes: Plain dosa parameters plus a nested potato-masala sub-recipe.
+    parameters:
+      solids_g:  {dist: lognormal, mu: 3.26, sigma: 0.25, unit: g, observable: true}
+      rice_fraction: {dist: normal, mu: 0.75, sigma: 0.04, unit: ratio}
+      fat_g:     {dist: lognormal, mu: 2.30, sigma: 0.55, unit: g,
+                  ask: "How much oil or ghee was used?",
+                  options: [{label: little, value: 6}, {label: medium, value: 11}, {label: generous, value: 20}]}
+      fat_type:  {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.40, 0.25, 0.25, 0.10]}
+      rice_type: {dist: categorical, categories: [parboiled, raw], weights: [0.70, 0.30]}
+      filling_g: {dist: lognormal, mu: 4.25, sigma: 0.30, unit: g, observable: true}
+    ingredients:
+      - {food: rice_parboiled, qty: 'solids_g * rice_fraction * (rice_type == "parboiled")', prep: soaked_ground, method: griddled}
+      - {food: rice_raw,       qty: 'solids_g * rice_fraction * (rice_type == "raw")',       prep: soaked_ground, method: griddled}
+      - {food: urad_dal,       qty: 'solids_g * (1 - rice_fraction) * 0.95', prep: soaked_ground, method: griddled}
+      - {food: gingelly_oil,   qty: 'fat_g * (fat_type == "gingelly")'}
+      - {food: coconut_oil,    qty: 'fat_g * (fat_type == "coconut")'}
+      - {food: ghee,           qty: 'fat_g * (fat_type == "ghee")'}
+      - {food: sunflower_oil,  qty: 'fat_g * (fat_type == "sunflower")'}
+      - {sub_template: PY-T-000112, qty: 'filling_g'}
+    regional:
+      KA: {fat_type: {dist: categorical, categories: [gingelly, coconut, ghee, sunflower], weights: [0.20, 0.10, 0.45, 0.25]}}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000114
+    dish: vada_medu
+    method: deep_fried
+    servings: 2
+    yield_factor: 1.84
+    notes: >
+      Deep frying is modelled as oil absorbed AS A FRACTION OF BATTER MASS, not as a
+      fixed gram amount. Absorption genuinely scales with surface area and batter
+      hydration, and it is the dominant term in a vada's energy - a fixed-oil model
+      would collapse exactly the variance that matters here.
+    parameters:
+      solids_g:      {dist: lognormal, mu: 3.69, sigma: 0.22, unit: g, observable: true}
+      oil_absorbed_frac: {dist: lognormal, mu: -1.77, sigma: 0.35, unit: ratio,
+                          ask: "How oily were they?",
+                          options: [{label: light, value: 0.10}, {label: usual, value: 0.17}, {label: very oily, value: 0.28}]}
+      fat_type:      {dist: categorical, categories: [sunflower, groundnut, gingelly, coconut], weights: [0.45, 0.30, 0.15, 0.10]}
+    ingredients:
+      - {food: urad_dal,      qty: 'solids_g * 0.94', prep: soaked_ground, method: deep_fried}
+      - {food: green_chilli,  qty: 'solids_g * 0.02'}
+      - {food: ginger,        qty: 'solids_g * 0.015'}
+      - {food: curry_leaf,    qty: 'solids_g * 0.01'}
+      - {food: black_pepper,  qty: 'solids_g * 0.005'}
+      - {food: salt,          qty: 'solids_g * 0.012'}
+      - {food: sunflower_oil, qty: 'solids_g * oil_absorbed_frac * (fat_type == "sunflower")'}
+      - {food: groundnut_oil, qty: 'solids_g * oil_absorbed_frac * (fat_type == "groundnut")'}
+      - {food: gingelly_oil,  qty: 'solids_g * oil_absorbed_frac * (fat_type == "gingelly")'}
+      - {food: coconut_oil,   qty: 'solids_g * oil_absorbed_frac * (fat_type == "coconut")'}
+    regional:
+      KL: {fat_type: {dist: categorical, categories: [sunflower, groundnut, gingelly, coconut], weights: [0.15, 0.10, 0.05, 0.70]}}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000115
+    dish: upma
+    method: simmered
+    servings: 2
+    # Semolina roughly triples in mass absorbing water.
+    yield_factor: 2.20
+    parameters:
+      semolina_g: {dist: lognormal, mu: 4.09, sigma: 0.22, unit: g, observable: true}
+      fat_g:      {dist: lognormal, mu: 2.30, sigma: 0.45, unit: g,
+                   ask: "How much oil or ghee?",
+                   options: [{label: little, value: 6}, {label: medium, value: 11}, {label: generous, value: 18}]}
+      fat_type:   {dist: categorical, categories: [sunflower, gingelly, ghee, coconut], weights: [0.40, 0.25, 0.20, 0.15]}
+      veg_g:      {dist: lognormal, mu: 3.00, sigma: 0.50, unit: g, observable: true}
+    ingredients:
+      - {food: semolina,      qty: 'semolina_g', prep: roasted, method: simmered}
+      - {food: onion,         qty: 'veg_g * 0.55', prep: chopped, method: sauteed}
+      - {food: carrot,        qty: 'veg_g * 0.30', prep: chopped, method: sauteed, optional: true}
+      - {food: beans_french,  qty: 'veg_g * 0.15', prep: chopped, method: sauteed, optional: true}
+      - {food: sunflower_oil, qty: 'fat_g * (fat_type == "sunflower")'}
+      - {food: gingelly_oil,  qty: 'fat_g * (fat_type == "gingelly")'}
+      - {food: ghee,          qty: 'fat_g * (fat_type == "ghee")'}
+      - {food: coconut_oil,   qty: 'fat_g * (fat_type == "coconut")'}
+      - {food: urad_dal,      qty: 'semolina_g * 0.03', prep: tempered}
+      - {food: chana_dal,     qty: 'semolina_g * 0.03', prep: tempered}
+      - {food: mustard_seed,  qty: 'semolina_g * 0.008'}
+      - {food: curry_leaf,    qty: 'semolina_g * 0.012'}
+      - {food: green_chilli,  qty: 'semolina_g * 0.02'}
+      - {food: salt,          qty: 'semolina_g * 0.015'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000116
+    dish: pongal_ven
+    method: simmered
+    servings: 2
+    yield_factor: 2.90
+    notes: Savoury pongal. Sakkarai (sweet) pongal is a separate template, not a variant.
+    parameters:
+      rice_g:   {dist: lognormal, mu: 3.91, sigma: 0.22, unit: g, observable: true}
+      dal_ratio: {dist: normal, mu: 0.30, sigma: 0.06, unit: ratio}
+      ghee_g:   {dist: lognormal, mu: 2.30, sigma: 0.50, unit: g,
+                 ask: "How much ghee?",
+                 options: [{label: little, value: 5}, {label: usual, value: 10}, {label: generous, value: 20}]}
+      cashew_g: {dist: lognormal, mu: 1.61, sigma: 0.40, unit: g}
+    ingredients:
+      - {food: rice_raw,      qty: 'rice_g', prep: washed, method: simmered}
+      - {food: moong_dal,     qty: 'rice_g * dal_ratio', prep: roasted, method: simmered}
+      - {food: ghee,          qty: 'ghee_g'}
+      - {food: cashew,        qty: 'cashew_g', prep: fried}
+      - {food: black_pepper,  qty: 'rice_g * 0.012'}
+      - {food: cumin_seed,    qty: 'rice_g * 0.012'}
+      - {food: ginger,        qty: 'rice_g * 0.02'}
+      - {food: curry_leaf,    qty: 'rice_g * 0.01'}
+      - {food: asafoetida,    qty: 'rice_g * 0.002'}
+      - {food: salt,          qty: 'rice_g * 0.018'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000117
+    dish: appam
+    method: griddled
+    servings: 2
+    yield_factor: 2.00
+    notes: >
+      Kerala. Coconut milk is in the batter, so the first extract (high fat) versus
+      second (dilute) is a real fork - they differ several-fold in energy density.
+    parameters:
+      solids_g:     {dist: lognormal, mu: 3.81, sigma: 0.22, unit: g, observable: true}
+      coconut_milk_g: {dist: lognormal, mu: 3.40, sigma: 0.35, unit: g}
+      milk_extract: {dist: categorical, categories: [first, second], weights: [0.45, 0.55]}
+      fermentation_h: {dist: normal, mu: 10, sigma: 3, unit: h}
+    ingredients:
+      - {food: rice_raw,       qty: 'solids_g * 0.96', prep: soaked_ground, method: griddled}
+      - {food: coconut_milk_1, qty: 'coconut_milk_g * (milk_extract == "first")'}
+      - {food: coconut_milk_2, qty: 'coconut_milk_g * (milk_extract == "second")'}
+      - {food: sugar,          qty: 'solids_g * 0.02'}
+      - {food: salt,           qty: 'solids_g * 0.008'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000118
+    dish: puttu
+    method: steamed
+    servings: 2
+    yield_factor: 1.35
+    notes: Kerala. Steamed rice flour and coconut in layers; no added fat.
+    parameters:
+      rice_flour_g: {dist: lognormal, mu: 4.38, sigma: 0.20, unit: g, observable: true}
+      coconut_g:    {dist: lognormal, mu: 3.22, sigma: 0.30, unit: g, observable: true}
+    ingredients:
+      - {food: rice_flour,    qty: 'rice_flour_g', method: steamed}
+      - {food: coconut_fresh, qty: 'coconut_g', prep: grated, method: steamed}
+      - {food: salt,          qty: 'rice_flour_g * 0.008'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000119
+    dish: ragi_mudde
+    method: simmered
+    servings: 1
+    yield_factor: 3.00
+    notes: >
+      Karnataka staple. No added fat at all - a useful counter-example to the
+      assumption that cooking oil always dominates a dish's energy variance.
+    parameters:
+      ragi_g: {dist: lognormal, mu: 4.09, sigma: 0.25, unit: g, observable: true}
+    ingredients:
+      - {food: ragi_flour, qty: 'ragi_g', method: simmered}
+      - {food: salt,       qty: 'ragi_g * 0.006'}

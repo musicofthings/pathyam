@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pathyam-engine"
+version = "0.1.0"
+description = "Deterministic nutrient computation with uncertainty propagation over parametric recipe templates"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Pathyam" }]
+# NumPy only. No scipy (rank correlation and eta-squared are ~20 lines), and
+# no expression-evaluation library: the AST whitelist in expressions.py is the
+# security boundary and is small enough to audit line by line.
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1", "psycopg_pool>=3.2"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "psycopg[binary]>=3.1", "psycopg_pool>=3.2"]
+dev = ["pytest>=7.4", "psycopg[binary]>=3.1", "psycopg_pool>=3.2", "pgserver>=0.1.4", "httpx>=0.27"]
+
+[project.scripts]
+pathyam-engine = "pathyam_engine.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pathyam_engine*", "pathyam_api*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["error::RuntimeWarning"]

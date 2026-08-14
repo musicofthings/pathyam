@@ -1,0 +1,198 @@
+# Pathyam — parametric recipe templates: gravies, rice dishes, accompaniments
+#
+# See tiffin.yaml for the authoring guide.
+
+templates:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000130
+    dish: sambar_podi
+    method: ground
+    servings: 1
+    yield_factor: 0.92
+    notes: >
+      Spice blend, used as a nested sub-recipe by sambar. Modelled separately
+      because household blends vary and because it exercises depth-2 nesting.
+    parameters:
+      podi_g: {dist: lognormal, mu: 1.61, sigma: 0.30, unit: g}
+    ingredients:
+      - {food: coriander_seed, qty: 'podi_g * 0.45', prep: roasted, method: ground}
+      - {food: red_chilli_dry, qty: 'podi_g * 0.25', prep: roasted, method: ground}
+      - {food: chana_dal,      qty: 'podi_g * 0.12', prep: roasted, method: ground}
+      - {food: toor_dal,       qty: 'podi_g * 0.08', prep: roasted, method: ground}
+      - {food: fenugreek_seed, qty: 'podi_g * 0.04', prep: roasted, method: ground}
+      - {food: black_pepper,   qty: 'podi_g * 0.03', prep: roasted, method: ground}
+      - {food: turmeric,       qty: 'podi_g * 0.03'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000131
+    dish: sambar
+    method: simmered
+    servings: 3
+    # Dal and vegetables absorb a large volume of water.
+    yield_factor: 3.40
+    notes: "Depth-2 nesting - sambar contains sambar podi."
+    parameters:
+      toor_dal_g: {dist: lognormal, mu: 3.40, sigma: 0.25, unit: g}
+      veg_g:      {dist: lognormal, mu: 4.50, sigma: 0.35, unit: g, observable: true}
+      tamarind_g: {dist: lognormal, mu: 2.30, sigma: 0.35, unit: g}
+      podi_g:     {dist: lognormal, mu: 2.08, sigma: 0.30, unit: g}
+      fat_g:      {dist: lognormal, mu: 1.79, sigma: 0.45, unit: g,
+                   ask: "How much oil in the tempering?",
+                   options: [{label: little, value: 3}, {label: usual, value: 6}, {label: generous, value: 12}]}
+      fat_type:   {dist: categorical, categories: [gingelly, sunflower, coconut, groundnut], weights: [0.50, 0.25, 0.15, 0.10]}
+    ingredients:
+      - {food: toor_dal,     qty: 'toor_dal_g', prep: boiled, method: simmered}
+      - {food: shallot,      qty: 'veg_g * 0.25', prep: chopped, method: simmered}
+      - {food: drumstick,    qty: 'veg_g * 0.25', prep: chopped, method: simmered, optional: true}
+      - {food: tomato,       qty: 'veg_g * 0.25', prep: chopped, method: simmered}
+      - {food: brinjal,      qty: 'veg_g * 0.25', prep: chopped, method: simmered, optional: true}
+      - {food: tamarind,     qty: 'tamarind_g'}
+      - {sub_template: PY-T-000130, qty: 'podi_g'}
+      - {food: gingelly_oil, qty: 'fat_g * (fat_type == "gingelly")'}
+      - {food: sunflower_oil, qty: 'fat_g * (fat_type == "sunflower")'}
+      - {food: coconut_oil,  qty: 'fat_g * (fat_type == "coconut")'}
+      - {food: groundnut_oil, qty: 'fat_g * (fat_type == "groundnut")'}
+      - {food: mustard_seed, qty: 'toor_dal_g * 0.012'}
+      - {food: curry_leaf,   qty: 'toor_dal_g * 0.02'}
+      - {food: asafoetida,   qty: 'toor_dal_g * 0.004'}
+      - {food: salt,         qty: '(toor_dal_g + veg_g) * 0.012'}
+    regional:
+      KL: {fat_type: {dist: categorical, categories: [gingelly, sunflower, coconut, groundnut], weights: [0.10, 0.15, 0.70, 0.05]}}
+      AP: {fat_type: {dist: categorical, categories: [gingelly, sunflower, coconut, groundnut], weights: [0.20, 0.25, 0.05, 0.50]}}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000132
+    dish: rasam
+    method: simmered
+    servings: 3
+    yield_factor: 4.20
+    notes: >
+      Very low energy density and mostly water. A useful QC case: a dish whose
+      per-100g energy should land near 20-30 kcal, so an authoring slip that puts
+      it at 200 is immediately visible.
+    parameters:
+      tamarind_g: {dist: lognormal, mu: 2.30, sigma: 0.35, unit: g}
+      tomato_g:   {dist: lognormal, mu: 4.09, sigma: 0.30, unit: g, observable: true}
+      toor_dal_g: {dist: lognormal, mu: 2.30, sigma: 0.40, unit: g}
+      fat_g:      {dist: lognormal, mu: 1.10, sigma: 0.45, unit: g}
+    ingredients:
+      - {food: tamarind,      qty: 'tamarind_g'}
+      - {food: tomato,        qty: 'tomato_g', prep: chopped, method: simmered}
+      - {food: toor_dal,      qty: 'toor_dal_g', prep: boiled, method: simmered, optional: true}
+      - {food: black_pepper,  qty: 'tomato_g * 0.012'}
+      - {food: cumin_seed,    qty: 'tomato_g * 0.012'}
+      - {food: garlic,        qty: 'tomato_g * 0.03', optional: true}
+      - {food: gingelly_oil,  qty: 'fat_g'}
+      - {food: mustard_seed,  qty: 'tomato_g * 0.006'}
+      - {food: curry_leaf,    qty: 'tomato_g * 0.015'}
+      - {food: coriander_leaf, qty: 'tomato_g * 0.02'}
+      - {food: asafoetida,    qty: 'tomato_g * 0.003'}
+      - {food: salt,          qty: 'tomato_g * 0.012'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000133
+    dish: curd_rice
+    method: assembled
+    servings: 2
+    yield_factor: 1.00
+    notes: >
+      No cooking step, so yield is exactly 1. Rice is entered as its COOKED mass,
+      unlike every other template here - a deliberate exception because that is how
+      the dish is actually assembled, and it is flagged so nobody "fixes" it.
+    parameters:
+      cooked_rice_g: {dist: lognormal, mu: 5.01, sigma: 0.25, unit: g, observable: true}
+      curd_g:        {dist: lognormal, mu: 4.61, sigma: 0.30, unit: g, observable: true}
+      fat_g:         {dist: lognormal, mu: 1.10, sigma: 0.50, unit: g}
+    ingredients:
+      - {food: rice_raw,      qty: 'cooked_rice_g * 0.33', prep: cooked}
+      - {food: curd,          qty: 'curd_g'}
+      - {food: milk_cow,      qty: 'curd_g * 0.15', optional: true}
+      - {food: gingelly_oil,  qty: 'fat_g'}
+      - {food: mustard_seed,  qty: 'cooked_rice_g * 0.004'}
+      - {food: urad_dal,      qty: 'cooked_rice_g * 0.008', prep: tempered}
+      - {food: green_chilli,  qty: 'cooked_rice_g * 0.008'}
+      - {food: ginger,        qty: 'cooked_rice_g * 0.006'}
+      - {food: curry_leaf,    qty: 'cooked_rice_g * 0.005'}
+      - {food: asafoetida,    qty: 'cooked_rice_g * 0.001'}
+      - {food: salt,          qty: 'cooked_rice_g * 0.008'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000134
+    dish: tamarind_rice
+    method: assembled
+    servings: 2
+    yield_factor: 1.00
+    notes: >
+      Gingelly oil is unusually high here - the oil is a preservative as much as a
+      flavour, which is why puliyodarai keeps for a day unrefrigerated. Authors
+      routinely under-enter it.
+    parameters:
+      cooked_rice_g: {dist: lognormal, mu: 5.01, sigma: 0.25, unit: g, observable: true}
+      tamarind_g:    {dist: lognormal, mu: 2.71, sigma: 0.35, unit: g}
+      fat_g:         {dist: lognormal, mu: 2.71, sigma: 0.40, unit: g,
+                      ask: "How much gingelly oil?",
+                      options: [{label: little, value: 8}, {label: usual, value: 15}, {label: generous, value: 25}]}
+      peanut_g:      {dist: lognormal, mu: 2.30, sigma: 0.40, unit: g}
+    ingredients:
+      - {food: rice_raw,       qty: 'cooked_rice_g * 0.33', prep: cooked}
+      - {food: tamarind,       qty: 'tamarind_g'}
+      - {food: gingelly_oil,   qty: 'fat_g'}
+      - {food: bengal_gram_whole, qty: 'peanut_g'}
+      - {food: chana_dal,      qty: 'cooked_rice_g * 0.012', prep: tempered}
+      - {food: urad_dal,       qty: 'cooked_rice_g * 0.012', prep: tempered}
+      - {food: mustard_seed,   qty: 'cooked_rice_g * 0.005'}
+      - {food: red_chilli_dry, qty: 'cooked_rice_g * 0.008'}
+      - {food: turmeric,       qty: 'cooked_rice_g * 0.002'}
+      - {food: asafoetida,     qty: 'cooked_rice_g * 0.002'}
+      - {food: curry_leaf,     qty: 'cooked_rice_g * 0.006'}
+      - {food: salt,           qty: 'cooked_rice_g * 0.012'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000135
+    dish: coconut_chutney
+    method: ground
+    servings: 3
+    yield_factor: 1.60
+    parameters:
+      coconut_g:   {dist: lognormal, mu: 3.91, sigma: 0.30, unit: g, observable: true}
+      chana_dal_g: {dist: lognormal, mu: 2.30, sigma: 0.35, unit: g}
+      fat_g:       {dist: lognormal, mu: 0.69, sigma: 0.45, unit: g}
+    ingredients:
+      - {food: coconut_fresh, qty: 'coconut_g', prep: grated, method: ground}
+      - {food: chana_dal,     qty: 'chana_dal_g', prep: roasted, method: ground}
+      - {food: green_chilli,  qty: 'coconut_g * 0.05'}
+      - {food: ginger,        qty: 'coconut_g * 0.02', optional: true}
+      - {food: tamarind,      qty: 'coconut_g * 0.02', optional: true}
+      - {food: coconut_oil,   qty: 'fat_g'}
+      - {food: mustard_seed,  qty: 'coconut_g * 0.006'}
+      - {food: urad_dal,      qty: 'coconut_g * 0.010', prep: tempered}
+      - {food: curry_leaf,    qty: 'coconut_g * 0.008'}
+      - {food: salt,          qty: 'coconut_g * 0.012'}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: PY-T-000136
+    dish: sakkarai_pongal
+    method: simmered
+    servings: 3
+    yield_factor: 2.40
+    notes: >
+      Sweet pongal. Deliberately a separate template from ven pongal rather than a
+      parameter on it: they differ by roughly 200 kcal per serving, and a shared
+      template would let a mis-set parameter silently swap one for the other.
+    parameters:
+      rice_g:    {dist: lognormal, mu: 3.91, sigma: 0.22, unit: g, observable: true}
+      dal_ratio: {dist: normal, mu: 0.25, sigma: 0.05, unit: ratio}
+      jaggery_g: {dist: lognormal, mu: 4.09, sigma: 0.30, unit: g,
+                  ask: "How sweet was it?",
+                  options: [{label: mild, value: 35}, {label: usual, value: 60}, {label: very sweet, value: 95}]}
+      ghee_g:    {dist: lognormal, mu: 2.71, sigma: 0.40, unit: g}
+      cashew_g:  {dist: lognormal, mu: 1.79, sigma: 0.40, unit: g}
+    ingredients:
+      - {food: rice_raw,   qty: 'rice_g', prep: washed, method: simmered}
+      - {food: moong_dal,  qty: 'rice_g * dal_ratio', prep: roasted, method: simmered}
+      - {food: jaggery,    qty: 'jaggery_g'}
+      - {food: ghee,       qty: 'ghee_g'}
+      - {food: cashew,     qty: 'cashew_g', prep: fried}
+      - {food: cardamom,   qty: 'rice_g * 0.006'}
+      - {food: milk_cow,   qty: 'rice_g * 0.30', optional: true}

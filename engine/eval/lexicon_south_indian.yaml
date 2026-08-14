@@ -1,0 +1,534 @@
+# Pathyam — South Indian dish lexicon (DRAFT)
+#
+# 50 dishes across Tamil Nadu, Kerala, Karnataka and Andhra/Telangana, with native
+# script and the romanisations people actually type.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠ THIS FILE NEEDS NATIVE-SPEAKER REVIEW BEFORE IT IS TRUSTED.
+#
+# The native-script forms and romanisations here are a careful first draft, not an
+# authority. Specific things a reviewer should check:
+#   · Malayalam and Telugu forms are the least certain of the four.
+#   · Regional spellings differ (Kongu vs Chettinad Tamil; Malabar vs Travancore).
+#   · Several dishes have genuinely contested names across states — bisi bele bath
+#     is Karnataka-only, sambar sadam is its rough Tamil analogue, and they are NOT
+#     the same dish. They are listed separately on purpose.
+#   · `aliases` should grow, not shrink: every extra spelling is free recall.
+#
+# Used for two things: the evaluation harness in ../pathyam_engine/evaluation/, and
+# as the seed of the Phase 1 production lexicon (loadable into ref.food_name).
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Schema per entry:
+#   key:            stable identifier used by the golden query set
+#   en:             canonical English name
+#   group:          food group
+#   regions:        states where the dish is common (TN/KL/KA/AP/TG)
+#   ta/te/ml/kn:    native script name (omit where the dish is not native)
+#   aliases:        romanisations and colloquial forms, any language
+#   has_template:   whether a computable recipe template is expected to exist
+
+dishes:
+
+  # ── tiffin / breakfast ────────────────────────────────────────────────────
+  - key: idli
+    base: true
+    en: Idli
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: இட்லி
+    te: ఇడ్లీ
+    ml: ഇഡ്ഡലി
+    kn: ಇಡ್ಲಿ
+    aliases: [idli, idly, iddly, idlee, itly, iddli]
+    has_template: true
+
+  - key: dosa_plain
+    base: true
+    en: Dosa, plain
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: தோசை
+    te: దోస
+    ml: ദോശ
+    kn: ದೋಸೆ
+    aliases: [dosa, dosai, thosai, dose, dosey, dhosa, plain dosa, sada dosa]
+    has_template: true
+
+  - key: dosa_masala
+    en: Dosa, masala
+    group: prepared_dish
+    regions: [TN, KA, KL, AP, TG]
+    ta: மசாலா தோசை
+    te: మసాలా దోస
+    ml: മസാല ദോശ
+    kn: ಮಸಾಲೆ ದೋಸೆ
+    aliases: [masala dosa, masala dosai, masale dose, masaala dosa, mysore masala dosa]
+    has_template: true
+
+  - key: dosa_rava
+    en: Rava dosa
+    group: prepared_dish
+    regions: [TN, KA]
+    ta: ரவை தோசை
+    kn: ರವೆ ದೋಸೆ
+    aliases: [rava dosa, ravai dosai, rave dose, rawa dosa]
+    has_template: true
+
+  - key: dosa_set
+    en: Set dosa
+    group: prepared_dish
+    regions: [KA]
+    kn: ಸೆಟ್ ದೋಸೆ
+    aliases: [set dosa, set dose]
+    has_template: true
+
+  - key: dosa_ghee_roast
+    en: Ghee roast dosa
+    group: prepared_dish
+    regions: [KA, TN]
+    kn: ತುಪ್ಪ ರೋಸ್ಟ್
+    ta: நெய் ரோஸ்ட்
+    aliases: [ghee roast, ghee roast dosa, neyi roast, tuppa dose]
+    has_template: true
+
+  - key: uttapam
+    base: true
+    en: Uttapam
+    group: prepared_dish
+    regions: [TN, KA]
+    ta: ஊத்தப்பம்
+    kn: ಉತ್ತಪ್ಪ
+    aliases: [uttapam, uthappam, ooththappam, uttappa, onion uttapam]
+    has_template: true
+
+  - key: vada_medu
+    base: true
+    en: Medu vada
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: மெது வடை
+    te: గారె
+    ml: ഉഴുന്ന് വട
+    kn: ಮೆದು ವಡೆ
+    aliases: [vada, vadai, vade, medu vada, ulundhu vadai, uddina vade, garelu, garee]
+    has_template: true
+
+  - key: pongal_ven
+    base: true
+    en: Ven pongal
+    group: prepared_dish
+    regions: [TN, AP, TG]
+    ta: வெண் பொங்கல்
+    te: పొంగలి
+    aliases: [pongal, ven pongal, khara pongal, venpongal, pongali]
+    has_template: true
+
+  - key: upma
+    base: true
+    en: Upma
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: உப்புமா
+    te: ఉప్మా
+    ml: ഉപ്പുമാവ്
+    kn: ಉಪ್ಪಿಟ್ಟು
+    aliases: [upma, uppuma, uppittu, uppumavu, rava upma]
+    has_template: true
+
+  - key: appam
+    base: true
+    en: Appam
+    group: prepared_dish
+    regions: [KL, TN]
+    ml: അപ്പം
+    ta: ஆப்பம்
+    aliases: [appam, aappam, palappam, vellayappam]
+    has_template: true
+
+  - key: idiyappam
+    base: true
+    en: Idiyappam
+    group: prepared_dish
+    regions: [KL, TN]
+    ml: ഇടിയപ്പം
+    ta: இடியாப்பம்
+    aliases: [idiyappam, idiappam, string hopper, nool puttu, sevai]
+    has_template: true
+
+  - key: puttu
+    base: true
+    en: Puttu
+    group: prepared_dish
+    regions: [KL]
+    ml: പുട്ട്
+    aliases: [puttu, pittu, kozhukkatta puttu]
+    has_template: true
+
+  - key: ragi_mudde
+    base: true
+    en: Ragi mudde
+    group: prepared_dish
+    regions: [KA]
+    kn: ರಾಗಿ ಮುದ್ದೆ
+    aliases: [ragi mudde, ragi muddhe, ragi ball, mudde, ragi sangati]
+    has_template: true
+
+  - key: poori
+    base: true
+    en: Poori
+    group: prepared_dish
+    regions: [TN, KA, AP, TG, KL]
+    ta: பூரி
+    te: పూరీ
+    kn: ಪೂರಿ
+    ml: പൂരി
+    aliases: [poori, puri, poori masala]
+    has_template: true
+
+  - key: parotta
+    base: true
+    en: Parotta
+    group: prepared_dish
+    regions: [TN, KL]
+    ta: பரோட்டா
+    ml: പൊറോട്ട
+    aliases: [parotta, porotta, barotta, kerala parotta, malabar parotta]
+    has_template: true
+
+  - key: kichadi
+    en: Rava kichadi
+    group: prepared_dish
+    regions: [TN, KA]
+    ta: கிச்சடி
+    kn: ಕಿಚಡಿ
+    aliases: [kichadi, kichidi, rava kichadi, khichdi]
+    has_template: true
+
+  # ── rice dishes ───────────────────────────────────────────────────────────
+  - key: curd_rice
+    base: true
+    en: Curd rice
+    group: prepared_dish
+    regions: [TN, KA, AP, TG]
+    ta: தயிர் சாதம்
+    te: పెరుగన్నం
+    kn: ಮೊಸರನ್ನ
+    ml: തൈര് സാദം
+    aliases: [curd rice, thayir sadam, daddojanam, perugannam, mosaranna, curd bath, thair sadam]
+    has_template: true
+
+  - key: lemon_rice
+    en: Lemon rice
+    group: prepared_dish
+    regions: [TN, KA, AP, TG]
+    ta: எலுமிச்சை சாதம்
+    kn: ಚಿತ್ರಾನ್ನ
+    te: నిమ్మకాయ పులిహోర
+    aliases: [lemon rice, elumichai sadam, chitranna, nimmakaya pulihora]
+    has_template: true
+
+  - key: tamarind_rice
+    en: Tamarind rice
+    group: prepared_dish
+    regions: [TN, KA, AP, TG]
+    ta: புளியோதரை
+    te: పులిహోర
+    kn: ಪುಳಿಯೊಗರೆ
+    aliases: [tamarind rice, puliyodarai, puliyodharai, pulihora, puliyogare, puli sadam]
+    has_template: true
+
+  - key: coconut_rice
+    en: Coconut rice
+    group: prepared_dish
+    regions: [TN, KL, KA]
+    ta: தேங்காய் சாதம்
+    kn: ತೆಂಗಿನಕಾಯಿ ಚಿತ್ರಾನ್ನ
+    aliases: [coconut rice, thengai sadam, kobbari annam]
+    has_template: true
+
+  - key: sambar_sadam
+    en: Sambar rice
+    group: prepared_dish
+    regions: [TN]
+    ta: சாம்பார் சாதம்
+    aliases: [sambar sadam, sambar rice, sambar saadham]
+    has_template: true
+
+  - key: bisi_bele_bath
+    en: Bisi bele bath
+    group: prepared_dish
+    regions: [KA]
+    kn: ಬಿಸಿ ಬೇಳೆ ಬಾತ್
+    aliases: [bisi bele bath, bisibelebath, bisi bela bath, bisibele huliyanna]
+    has_template: true
+
+  - key: vangi_bath
+    en: Vangi bath
+    group: prepared_dish
+    regions: [KA]
+    kn: ವಾಂಗಿ ಬಾತ್
+    aliases: [vangi bath, vangibath, brinjal rice]
+    has_template: true
+
+  - key: biryani_hyderabadi
+    base: true
+    en: Hyderabadi biryani
+    group: prepared_dish
+    regions: [TG, AP]
+    te: హైదరాబాదీ బిర్యానీ
+    aliases: [biryani, biriyani, hyderabadi biryani, dum biryani, briyani]
+    has_template: true
+
+  - key: ghee_rice
+    en: Ghee rice
+    group: prepared_dish
+    regions: [KL, KA]
+    ml: നെയ്ച്ചോറ്
+    kn: ತುಪ್ಪದ ಅನ್ನ
+    aliases: [ghee rice, neychoru, ney choru, tuppada anna]
+    has_template: true
+
+  # ── gravies, kuzhambu, curries ────────────────────────────────────────────
+  - key: sambar
+    base: true
+    en: Sambar
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: சாம்பார்
+    te: సాంబార్
+    ml: സാമ്പാർ
+    kn: ಸಾಂಬಾರ್
+    aliases: [sambar, sambhar, saambar, huli, sambaar]
+    has_template: true
+
+  - key: rasam
+    base: true
+    en: Rasam
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: ரசம்
+    te: చారు
+    ml: രസം
+    kn: ಸಾರು
+    aliases: [rasam, charu, saaru, chaaru, milagu rasam]
+    has_template: true
+
+  - key: mor_kuzhambu
+    en: Mor kuzhambu
+    group: prepared_dish
+    regions: [TN]
+    ta: மோர் குழம்பு
+    aliases: [mor kuzhambu, more kulambu, majjiga pulusu, buttermilk curry]
+    has_template: true
+
+  - key: vatha_kuzhambu
+    en: Vathal kuzhambu
+    group: prepared_dish
+    regions: [TN]
+    ta: வத்தல் குழம்பு
+    aliases: [vatha kuzhambu, vathal kulambu, vathakuzhambu]
+    has_template: true
+
+  - key: kara_kuzhambu
+    en: Kara kuzhambu
+    group: prepared_dish
+    regions: [TN]
+    ta: கார குழம்பு
+    aliases: [kara kuzhambu, kaara kulambu]
+    has_template: true
+
+  - key: pulusu
+    base: true
+    en: Pulusu
+    group: prepared_dish
+    regions: [AP, TG]
+    te: పులుసు
+    aliases: [pulusu, chepa pulusu, tomato pulusu]
+    has_template: true
+
+  - key: aviyal
+    base: true
+    en: Aviyal
+    group: prepared_dish
+    regions: [KL, TN]
+    ml: അവിയൽ
+    ta: அவியல்
+    aliases: [aviyal, avial, aviyel]
+    has_template: true
+
+  - key: thoran
+    base: true
+    en: Thoran
+    group: prepared_dish
+    regions: [KL]
+    ml: തോരൻ
+    aliases: [thoran, thoren, cabbage thoran, beans thoran]
+    has_template: true
+
+  - key: olan
+    base: true
+    en: Olan
+    group: prepared_dish
+    regions: [KL]
+    ml: ഓലൻ
+    aliases: [olan, olen]
+    has_template: true
+
+  - key: kaalan
+    base: true
+    en: Kaalan
+    group: prepared_dish
+    regions: [KL]
+    ml: കാളൻ
+    aliases: [kaalan, kalan]
+    has_template: true
+
+  - key: kootu
+    base: true
+    en: Kootu
+    group: prepared_dish
+    regions: [TN, KL]
+    ta: கூட்டு
+    ml: കൂട്ടുകറി
+    aliases: [kootu, koottu, kootu curry]
+    has_template: true
+
+  - key: poriyal
+    base: true
+    en: Poriyal
+    group: prepared_dish
+    regions: [TN]
+    ta: பொரியல்
+    aliases: [poriyal, poriyel, beans poriyal, cabbage poriyal]
+    has_template: true
+
+  - key: gongura_pachadi
+    en: Gongura pachadi
+    group: prepared_dish
+    regions: [AP, TG]
+    te: గోంగూర పచ్చడి
+    aliases: [gongura pachadi, gongura chutney, gongura]
+    has_template: true
+
+  - key: chettinad_chicken
+    en: Chettinad chicken
+    group: prepared_dish
+    regions: [TN]
+    ta: செட்டிநாடு கோழி
+    aliases: [chettinad chicken, chettinadu kozhi, chicken chettinad]
+    has_template: true
+
+  - key: meen_curry
+    base: true
+    en: Fish curry
+    group: prepared_dish
+    regions: [KL, TN, AP]
+    ml: മീൻ കറി
+    ta: மீன் குழம்பு
+    te: చేపల పులుసు
+    aliases: [meen curry, fish curry, meen kulambu, chepala pulusu, fish molee]
+    has_template: true
+
+  # ── accompaniments ────────────────────────────────────────────────────────
+  - key: coconut_chutney
+    base: true
+    en: Coconut chutney
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: தேங்காய் சட்னி
+    ml: തേങ്ങ ചമ്മന്തി
+    kn: ತೆಂಗಿನಕಾಯಿ ಚಟ್ನಿ
+    te: కొబ్బరి పచ్చడి
+    aliases: [coconut chutney, thengai chutney, chammanthi, kobbari pachadi, chutney]
+    has_template: true
+
+  - key: tomato_chutney
+    en: Tomato chutney
+    group: prepared_dish
+    regions: [TN, AP, TG, KA]
+    ta: தக்காளி சட்னி
+    te: టమాటా పచ్చడి
+    aliases: [tomato chutney, thakkali chutney, tomato pachadi]
+    has_template: true
+
+  - key: sundal
+    base: true
+    en: Sundal
+    group: prepared_dish
+    regions: [TN]
+    ta: சுண்டல்
+    aliases: [sundal, sundhal, kadalai sundal]
+    has_template: true
+
+  # ── snacks and sweets ─────────────────────────────────────────────────────
+  - key: bonda
+    base: true
+    en: Bonda
+    group: prepared_dish
+    regions: [TN, KA, AP, TG]
+    ta: போண்டா
+    kn: ಬೋಂಡಾ
+    aliases: [bonda, bhonda, aloo bonda, mysore bonda]
+    has_template: true
+
+  - key: bajji
+    base: true
+    en: Bajji
+    group: prepared_dish
+    regions: [TN, KA, AP, TG]
+    ta: பஜ்ஜி
+    te: బజ్జీ
+    kn: ಬಜ್ಜಿ
+    aliases: [bajji, bajjii, molaga bajji, chilli bajji, bonda bajji]
+    has_template: true
+
+  - key: murukku
+    base: true
+    en: Murukku
+    group: prepared_dish
+    regions: [TN, KL, KA]
+    ta: முறுக்கு
+    ml: മുറുക്ക്
+    kn: ಚಕ್ಕುಲಿ
+    aliases: [murukku, murduku, chakli, chakkuli, thenkuzhal]
+    has_template: true
+
+  - key: mysore_pak
+    en: Mysore pak
+    group: prepared_dish
+    regions: [KA, TN]
+    kn: ಮೈಸೂರು ಪಾಕ್
+    ta: மைசூர் பாகு
+    aliases: [mysore pak, mysore paak, mysurpa]
+    has_template: true
+
+  - key: payasam
+    base: true
+    en: Payasam
+    group: prepared_dish
+    regions: [TN, KL, KA, AP, TG]
+    ta: பாயசம்
+    ml: പായസം
+    kn: ಪಾಯಸ
+    te: పాయసం
+    aliases: [payasam, payasa, paal payasam, semiya payasam, kheer, ada pradhaman]
+    has_template: true
+
+  - key: rava_kesari
+    en: Rava kesari
+    group: prepared_dish
+    regions: [TN, KA]
+    ta: ரவை கேசரி
+    kn: ಕೇಸರಿ ಬಾತ್
+    aliases: [kesari, rava kesari, kesari bath, sheera]
+    has_template: true
+
+  - key: sakkarai_pongal
+    en: Sakkarai pongal
+    group: prepared_dish
+    regions: [TN, AP, TG]
+    ta: சர்க்கரை பொங்கல்
+    te: చక్కెర పొంగలి
+    aliases: [sakkarai pongal, chakkara pongali, sweet pongal, sarkkarai pongal]
+    has_template: true
