@@ -416,3 +416,37 @@ class HealthResponse(BaseModel):
     lexicon_entries: int
     notes: list[str] = Field(default_factory=list)
 
+
+# ------------------------------------------------------------- Vision Resolve ----
+
+
+class VisionResolvePortion(BaseModel):
+    grams: float | None = None
+    millilitres: float | None = None
+    uncertainty: Literal["low", "medium", "high"] = "medium"
+    min_grams: float | None = None
+    max_grams: float | None = None
+
+
+class VisionObservationItem(BaseModel):
+    visual_label: str
+    estimated_portion: VisionResolvePortion
+    preparation: str = "unknown"
+    count: int | None = None
+    modifiers: list[str] = Field(default_factory=list)
+    confidence: float = 0.85
+    candidates: list[CandidateOut] = Field(default_factory=list)
+
+
+class VisionQualityGateOut(BaseModel):
+    passed: bool
+    quality_score: float
+    issues: list[str] = Field(default_factory=list)
+
+
+class VisionResolveResponse(BaseModel):
+    quality_gate: VisionQualityGateOut
+    observations: list[VisionObservationItem]
+    model_version: str = "gemini-3.7-flash"
+
+

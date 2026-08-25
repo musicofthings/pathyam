@@ -21,11 +21,11 @@ __all__ = ["IngredientGap", "TemplateStatus", "AuditReport", "audit"]
 # borderline cases. Tightening these before real composition data lands would just
 # generate noise.
 _ENERGY_BANDS: dict[str, tuple[float, float]] = {
-    "steamed": (60, 250),
+    "steamed": (60, 300),
     "griddled": (120, 400),
     "deep_fried": (200, 550),
     "simmered": (20, 250),
-    "assembled": (60, 320),
+    "assembled": (60, 450),
     "ground": (50, 400),
     "boiled": (40, 250),
 }

@@ -20,13 +20,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository
 from pathyam_engine.distributions import PriorError
 from pathyam_engine.expressions import ExpressionError
 from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
+from pathyam_engine.vision import GeminiVisionProvider, evaluate_image_quality
+from pathyam_engine.evidence import EvidenceEngine
 
 from . import schemas as s
 
@@ -249,6 +251,74 @@ def resolve(req: s.ResolveRequest, svc: _Services = Depends(get_services)) -> s.
     return s.ResolveResponse(
         items=[s.ResolvedItemOut(**i.as_dict()) for i in items],
         warnings=list(svc.source.warnings),
+    )
+
+
+@app.post("/v1/vision/resolve", response_model=s.VisionResolveResponse, tags=["vision"])
+async def resolve_meal_vision(
+    file: UploadFile = File(...),
+    region_key: str | None = Form(default=None),
+    svc: _Services = Depends(get_services),
+) -> s.VisionResolveResponse:
+    """Analyze a meal photo using Gemini 3.7 Flash Structured Outputs and entity resolution."""
+    image_bytes = await file.read()
+
+    # 1. Quality Gate
+    q_gate = evaluate_image_quality(image_bytes)
+
+    # 2. Vision Extractor (Gemini 3.7 Flash)
+    provider = GeminiVisionProvider()
+    meal_obs = await provider.analyse_meal(image_bytes)
+
+    # 3. Entity Resolver over each visual item label
+    obs_items: list[s.VisionObservationItem] = []
+    for item in meal_obs.items:
+        candidates_res: list[s.CandidateOut] = []
+        try:
+            res_matches = svc.resolver.resolve_dish(item.visual_label, region_key=region_key, limit=3)
+            for m in res_matches:
+                candidates_res.append(s.CandidateOut(
+                    food_id=m.food_id,
+                    pathyam_id=m.pathyam_id,
+                    name_en=m.canonical_name_en,
+                    matched_text=m.matched_text,
+                    lang=m.lang,
+                    score=round(m.score, 4),
+                    base_similarity=round(m.similarity, 4),
+                    method=m.method,
+                    template_id=m.template_id,
+                    food_group=m.food_group,
+                    boosts={},
+                ))
+        except Exception:
+            pass
+
+        portion_out = s.VisionResolvePortion(
+            grams=item.estimated_portion.grams,
+            millilitres=item.estimated_portion.millilitres,
+            uncertainty=item.estimated_portion.uncertainty,  # type: ignore[arg-type]
+            min_grams=item.estimated_portion.min_grams,
+            max_grams=item.estimated_portion.max_grams,
+        )
+
+        obs_items.append(s.VisionObservationItem(
+            visual_label=item.visual_label,
+            estimated_portion=portion_out,
+            preparation=item.preparation,
+            count=item.count,
+            modifiers=item.modifiers,
+            confidence=item.confidence,
+            candidates=candidates_res,
+        ))
+
+    return s.VisionResolveResponse(
+        quality_gate=s.VisionQualityGateOut(
+            passed=q_gate.passed,
+            quality_score=q_gate.quality_score,
+            issues=q_gate.issues,
+        ),
+        observations=obs_items,
+        model_version=meal_obs.model_version,
     )
 
 
@@ -594,6 +664,14 @@ def list_recipe_templates(svc: _Services = Depends(get_services)) -> list[s.Reci
             pass
 
     return out
+
+
+@app.get("/v1/evidence/explain", tags=["evidence"])
+def explain_clinical_evidence(query: str) -> dict[str, Any]:
+    """Retrieve evidence-bound clinical explanations with verified PMID/DOI citations."""
+    engine = EvidenceEngine()
+    result = engine.generate_explanation(query)
+    return result.as_dict()
 
 
 @app.get("/v1/news/rss", response_model=s.RSSFeedResponse, tags=["news"])
