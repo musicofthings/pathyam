@@ -230,3 +230,73 @@ def test_no_food_has_two_live_values_for_the_same_nutrient(conn):
                ) duplicated"""
         )
         assert cur.fetchone()[0] == 0
+
+
+# ------------------------------------------------------- evidence corpus ----
+
+def _seed_evidence(cur):
+    cur.execute("DELETE FROM ref.evidence_document")
+    cur.executemany(
+        """INSERT INTO ref.evidence_document
+               (tier, pmid, title, abstract, journal, authors, publication_year,
+                retrieved_via)
+           VALUES ('TIER_2_PUBMED', %s, %s, %s, %s, %s, %s, 'test')""",
+        [
+            ("35875218",
+             "Glycemic carbohydrates, glycemic index, and glycemic load of South Indian foods",
+             "Idli showed a lower glycemic index than white rice, attributed to urad dal "
+             "and natural fermentation of the batter.",
+             "J Food Sci Technol", ["Shakappa D"], 2022),
+            ("24587528",
+             "Evaluation of finger millet incorporated noodles",
+             "Finger millet noodles produced a lower postprandial glucose response than "
+             "refined wheat noodles in healthy adults.",
+             "J Food Sci Technol", ["Shukla K"], 2014),
+        ],
+    )
+
+
+def test_evidence_retrieval_ranks_by_full_text_relevance(conn):
+    from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
+
+    with conn.cursor() as cur:
+        _seed_evidence(cur)
+        hits = PostgresEvidenceRetriever(conn).retrieve("idli glycemic index", limit=5)
+        assert hits, "a well-matched query must retrieve something"
+        assert hits[0].pmid == "35875218"
+        assert hits[0].score > 0
+        assert hits == sorted(hits, key=lambda d: -d.score)
+    conn.rollback()
+
+
+def test_a_natural_language_question_still_retrieves(conn):
+    """websearch_to_tsquery ANDs its terms, so questions returned nothing at all."""
+    from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
+
+    with conn.cursor() as cur:
+        _seed_evidence(cur)
+        hits = PostgresEvidenceRetriever(conn).retrieve(
+            "does idli have a lower glycemic index than white rice"
+        )
+        assert hits and hits[0].pmid == "35875218"
+    conn.rollback()
+
+
+def test_an_unrelated_query_retrieves_nothing(conn):
+    """OR'd terms plus stemming made 'topic' match 'topical'; a rank floor stops it."""
+    from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
+
+    with conn.cursor() as cur:
+        _seed_evidence(cur)
+        assert PostgresEvidenceRetriever(conn).retrieve("purple aeroplane sonata") == []
+    conn.rollback()
+
+
+def test_every_corpus_document_carries_an_identifier(conn):
+    """A document nobody can verify has no business in a clinical evidence corpus."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT count(*) FROM ref.evidence_document
+                WHERE pmid IS NULL AND doi IS NULL AND guideline_ref IS NULL"""
+        )
+        assert cur.fetchone()[0] == 0

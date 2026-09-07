@@ -11,6 +11,7 @@ from pathlib import Path
 from .audit import audit as run_audit
 from .lexicon import load_lexicon_file, load_lexicon_into_postgres
 from .derived_foods import load_derived_foods
+from .evidence_corpus import build_corpus_from_pubmed
 from .ifct2017 import load_ifct_into_postgres
 from .loader import load_into_postgres
 from .schema import load_library
@@ -131,6 +132,21 @@ def cmd_derived(args) -> int:
     return 0
 
 
+def cmd_evidence(args) -> int:
+    """Build the clinical evidence corpus from PubMed."""
+    import psycopg
+
+    with psycopg.connect(args.dsn) as conn:
+        result = build_corpus_from_pubmed(
+            conn, per_query=args.per_query, dry_run=args.dry_run
+        )
+
+    print(json.dumps(result.as_dict(), indent=2))
+    if args.dry_run:
+        print("\n(dry run — rolled back)")
+    return 0
+
+
 def cmd_audit(args) -> int:
     import psycopg
 
@@ -219,6 +235,13 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--dry-run", action="store_true")
     d.set_defaults(func=cmd_derived)
 
+    e = sub.add_parser("evidence",
+                       help="build the clinical evidence corpus from PubMed")
+    e.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
+    e.add_argument("--per-query", type=int, default=6)
+    e.add_argument("--dry-run", action="store_true")
+    e.set_defaults(func=cmd_evidence)
+
     a = sub.add_parser("audit", help="report computable templates and the ingredient worklist")
     a.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
     a.add_argument("--samples", type=int, default=800)
@@ -227,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=cmd_audit)
 
     args = parser.parse_args(argv)
-    if args.command in {"load", "audit", "ifct", "derived"} and not args.dsn:
+    if args.command in {"load", "audit", "ifct", "derived", "evidence"} and not args.dsn:
         parser.error("no DSN: pass --dsn or set PATHYAM_DSN")
     return args.func(args)
 

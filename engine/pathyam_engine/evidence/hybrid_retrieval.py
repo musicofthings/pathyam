@@ -27,12 +27,13 @@ worse than having none. Until then there is one arm, and it is named for what it
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from typing import Sequence
 
 from .protocol import EvidenceDocument, EvidenceTier
 
-__all__ = ["HybridEvidenceRetriever", "reciprocal_rank_fusion"]
+__all__ = ["HybridEvidenceRetriever", "PostgresEvidenceRetriever", "reciprocal_rank_fusion"]
 
 # Curated reference corpus of South Indian clinical nutrition literature & guidelines
 CLINICAL_EVIDENCE_CORPUS = [
@@ -139,4 +140,85 @@ class HybridEvidenceRetriever:
     # Kept so existing callers do not break. Deliberately not named "hybrid": there
     # is one retrieval arm, and calling it hybrid is how the previous version came to
     # describe a keyword matcher as pgvector + BM25.
+    retrieve_hybrid = retrieve
+
+
+class PostgresEvidenceRetriever:
+    """Lexical retrieval over ``ref.evidence_document`` using PostgreSQL FTS.
+
+    This is the real version of what the in-memory retriever above approximates:
+    ``websearch_to_tsquery`` against a stored ``tsvector`` with the title weighted
+    above the abstract, ranked by ``ts_rank_cd``.
+
+    It is still ONE arm. There is no semantic retrieval, so nothing is fused --
+    :func:`reciprocal_rank_fusion` stays unused until a second, genuinely different
+    arm exists. Naming this "hybrid" is what let the previous version describe a
+    keyword matcher as pgvector + BM25.
+    """
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    @staticmethod
+    def _or_tsquery(query: str) -> str:
+        """Turn free text into an OR'd tsquery.
+
+        websearch_to_tsquery and plainto_tsquery both AND their terms, so a natural
+        question -- "does idli have a lower glycemic index than rice" -- required every
+        content word to appear in one document and returned nothing at all. Retrieval
+        should rank, not filter: OR the terms and let ts_rank_cd order them, so a
+        document matching three of five terms is a weak hit rather than absent.
+
+        Terms are stripped to [a-z0-9] before being joined, so nothing reaches
+        to_tsquery that could be read as operator syntax.
+        """
+        terms = [t for t in re.findall(r"[a-z0-9]+", (query or "").lower()) if len(t) > 2]
+        return " | ".join(dict.fromkeys(terms))
+
+    # OR'd retrieval buys recall at the cost of spurious single-term hits, made worse
+    # by stemming: "zzzz nonexistent topic" matched a coconut oil review because the
+    # English stemmer folds "topical" to "topic". Measured against this corpus, a
+    # nonsense query scores 0.40 while genuine matches score 3.2 and above, so a floor
+    # of 1.0 separates them with room to spare. Re-check it if the corpus grows a lot.
+    MIN_RANK = 1.0
+
+    def retrieve(self, query: str, limit: int = 5,
+                 min_rank: float | None = None) -> list[EvidenceDocument]:
+        tsquery = self._or_tsquery(query)
+        if not tsquery:
+            return []
+        floor = self.MIN_RANK if min_rank is None else min_rank
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """SELECT evidence_id, tier, title, abstract, pmid, doi,
+                          guideline_ref, authors, publication_year,
+                          ts_rank_cd(search_tsv, q) AS rank
+                     FROM ref.evidence_document,
+                          to_tsquery('english', %s) AS q
+                    WHERE search_tsv @@ q
+                      AND ts_rank_cd(search_tsv, q) >= %s
+                    ORDER BY rank DESC
+                    LIMIT %s""",
+                (tsquery, floor, limit),
+            )
+            rows = cur.fetchall()
+
+        return [
+            EvidenceDocument(
+                evidence_id=f"EVIDENCE_{row[0]:05d}",
+                tier=row[1],
+                title=row[2],
+                content=row[3] or "",
+                pmid=row[4],
+                doi=row[5],
+                guideline_ref=row[6],
+                authors=list(row[7] or []),
+                publication_year=row[8],
+                score=float(row[9]),
+            )
+            for row in rows
+        ]
+
+    # Same reasoning as the in-memory retriever: kept for callers, not called hybrid.
     retrieve_hybrid = retrieve

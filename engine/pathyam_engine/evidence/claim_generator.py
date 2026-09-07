@@ -41,8 +41,16 @@ class EvidenceEngine:
         # 1. Retrieve evidence documents using Hybrid Retrieval (FTS + pgvector RRF)
         docs = self.retriever.retrieve(query, limit=3)
         if not docs:
-            # Fallback retrieve top guidelines
-            docs = self.retriever.corpus[:2]
+            # Nothing matched. Returning arbitrary corpus documents as a "fallback"
+            # would attach citations to a question they do not answer, which is the
+            # shape of the problem this layer exists to prevent. An empty result is
+            # the correct answer to a query the corpus cannot support.
+            return ExplanationResult(
+                clinical_explanation="",
+                claims=[],
+                retrieved_documents=[],
+                suppressed_citations_count=0,
+            )
 
         doc_map = {d.evidence_id: d for d in docs}
 

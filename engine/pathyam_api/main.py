@@ -31,6 +31,7 @@ from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
 from pathyam_engine.vision import (GeminiVisionProvider, VisionError,
                                    VisionNotConfigured, evaluate_image_quality)
 from pathyam_engine.evidence import EvidenceEngine, NCBIClient
+from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
 
 from . import schemas as s
 from .journal import GlucoseRepository, JournalRepository, resolve_user_id
@@ -686,11 +687,19 @@ def list_recipe_templates(svc: _Services = Depends(get_services)) -> list[s.Reci
 
 
 @app.get("/v1/evidence/explain", tags=["evidence"])
-def explain_clinical_evidence(query: str) -> dict[str, Any]:
-    """Retrieve evidence-bound clinical explanations with verified PMID/DOI citations."""
-    engine = EvidenceEngine()
-    result = engine.generate_explanation(query)
-    return result.as_dict()
+def explain_clinical_evidence(
+    query: str,
+    svc: _Services = Depends(get_services),
+) -> dict[str, Any]:
+    """Retrieve evidence for a query, with every citation checked against its record.
+
+    Retrieval is PostgreSQL full-text search over `ref.evidence_document`, whose rows
+    are fetched from PubMed rather than authored — so a document cannot claim a title
+    its own PMID does not resolve to. Each citation is then verified by title, authors
+    and year; anything CONTRADICTED is reported rather than rendered.
+    """
+    engine = EvidenceEngine(retriever=PostgresEvidenceRetriever(svc.conn))
+    return engine.generate_explanation(query).as_dict()
 
 
 @app.get("/v1/news/rss", response_model=s.RSSFeedResponse, tags=["news"])
