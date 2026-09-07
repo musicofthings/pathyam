@@ -205,3 +205,52 @@ catalogued lexicon every one resolves, which is why the catalogued score is 100%
    valuable for resolving *ingredient* mentions, which nothing currently covers —
    but that is a different capability from dish resolution, and it is not what this
    harness measures.
+
+---
+
+## Why the dosa cluster fails held-out — and why the fix is not in `trigram.py`
+
+Six of the 23 held-out failures are one cluster: `dosai`, `thosai`, `dose`, `dhosa`,
+`dosey`, `oru dosai` all expect `dosa_plain` and lose to `dosa_rava` or
+`dosa_ghee_roast`. Measured, not assumed:
+
+    word_similarity('dosai', 'dosa')              0.571
+    word_similarity('dosai', 'ravai dosai')       1.000   <- alias of dosa_rava
+    word_similarity('dosai', 'ghee roast dosai')  1.000   <- alias of dosa_ghee_roast
+
+    resolver output for 'dosai':
+      Rava dosa      score 0.9420  sim 0.9400  trigram
+      Dosa, plain    score 0.5915  sim 0.5371  trigram   (+base_variant 0.03)
+
+Two separate things are happening, and they need separate fixes.
+
+**1. An unmatched qualifier costs nothing.** `word_similarity` scores the best
+window, so a one-word query matching one word of a two-word candidate scores a
+perfect 1.0. "dosai" against "ravai dosai" is a full-credit match even though the
+candidate carries a qualifier the user never said. The existing `base_variant` boost
+(0.03, and applied to *headroom*, which is nearly zero once similarity is high) is far
+too small to overcome a 0.94-vs-0.54 gap.
+
+The fix belongs in `resolver._rerank`, **not** in `trigram.word_similarity`. That
+function is deliberately bug-compatible with PostgreSQL's `pg_trgm` so that offline
+ranking equals production ranking; changing its semantics silently breaks that
+guarantee. Add a coverage term to the resolver's blend instead: discount a candidate
+in proportion to the share of its own words the query left unexplained. Note that a
+naive version is not sufficient on its own — at a 0.6 floor the example above still
+scores 0.752 against plain dosa's 0.537 — so the coverage discount has to be paired
+with letting the phonetic signal win here (`phonetic_similarity('dosai', 'dosa')` is
+1.000, and the resolver currently prefers the higher trigram score).
+
+**2. The ablation makes this worse than production.** `holdout` removes a query
+string from *every* dish. Removing "dosai" strips it from `dosa_plain`, but
+`dosa_rava` keeps "ravai dosai", which still contains the token exactly. So the base
+dish is stripped of the user's spelling while a sibling retains a near-identical one.
+In production "dosai" is a catalogued alias of `dosa_plain` and resolves exactly.
+
+So part of the 53.3% is a measurement artifact on top of the lexeme ceiling already
+documented above. Before tuning, consider holding out per-dish rather than globally,
+or excluding sibling aliases that contain the held-out token — otherwise the harness
+rewards changes that fix an artifact rather than a user-visible failure.
+
+**Not attempted here.** Changing ranking without room to re-run the full ablation
+would be unmeasured tuning, which is what this document exists to prevent.
