@@ -228,3 +228,45 @@ def test_leave_one_out_preserves_the_abstention_safety_property(dishes, queries)
     stats = evaluate_leave_one_out(dishes, queries).abstention()
     assert stats["expected_ask_recall"] == 1.0
     assert stats["silent_errors"] <= 0.05
+
+
+# ------------------------------------------------------- lexicon coverage ----
+#
+# A dish claiming a region should carry that region's language. The check is scoped
+# to claimed regions on purpose: olan and kaalan are Kerala dishes and have no Tamil
+# or Telugu name, and demanding one would invite somebody to invent it. Counting raw
+# blanks makes the lexicon look 93 names short; counting real gaps found three.
+
+_REGION_LANGUAGE = {"TN": "ta", "KL": "ml", "KA": "kn", "AP": "te", "TG": "te"}
+
+
+def test_every_dish_carries_a_native_name_for_each_region_it_claims(dishes):
+    gaps = []
+    for dish in dishes:
+        expected = {
+            _REGION_LANGUAGE[r]
+            for r in dish.get("regions", ())
+            if r in _REGION_LANGUAGE
+        }
+        missing = sorted(lang for lang in expected if not dish.get(lang))
+        if missing:
+            gaps.append(f"{dish['key']} claims {dish.get('regions')} but has no {missing}")
+
+    assert not gaps, (
+        "dishes claim a region whose language they do not carry:\n  "
+        + "\n  ".join(gaps)
+        + "\n\nEither add the native name or drop the region claim — do not invent one."
+    )
+
+
+def test_no_surface_form_is_claimed_by_two_different_dishes(dishes):
+    """An ambiguous alias silently logs the wrong food."""
+    from pathyam_engine.resolution.trigram import normalize
+
+    owners: dict[str, set[str]] = {}
+    for dish in dishes:
+        for surface in [dish["en"], *dish.get("aliases", ())]:
+            owners.setdefault(normalize(surface), set()).add(dish["key"])
+
+    clashes = {s: sorted(k) for s, k in owners.items() if len(k) > 1}
+    assert not clashes, f"surface forms claimed by more than one dish: {clashes}"

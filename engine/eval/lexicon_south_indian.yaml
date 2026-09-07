@@ -244,7 +244,8 @@ dishes:
     regions: [TN, KL, KA]
     ta: தேங்காய் சாதம்
     kn: ತೆಂಗಿನಕಾಯಿ ಚಿತ್ರಾನ್ನ
-    aliases: [coconut rice, thengai sadam, kobbari annam]
+    ml: തേങ്ങ ചോറ്          # REVIEW — Kerala form; thenga choru
+    aliases: [coconut rice, thengai sadam, kobbari annam, thenga choru, thengai soru]
     has_template: true
 
   - key: sambar_sadam
@@ -449,7 +450,8 @@ dishes:
     regions: [TN, AP, TG, KA]
     ta: தக்காளி சட்னி
     te: టమాటా పచ్చడి
-    aliases: [tomato chutney, thakkali chutney, tomato pachadi]
+    kn: ಟೊಮೇಟೊ ಚಟ್ನಿ         # REVIEW — direct borrowing in both words
+    aliases: [tomato chutney, thakkali chutney, tomato pachadi, tomato chutni]
     has_template: true
 
   - key: sundal
@@ -469,7 +471,8 @@ dishes:
     regions: [TN, KA, AP, TG]
     ta: போண்டா
     kn: ಬೋಂಡಾ
-    aliases: [bonda, bhonda, aloo bonda, mysore bonda]
+    te: బోండా               # REVIEW — direct transliteration
+    aliases: [bonda, bhonda, aloo bonda, mysore bonda, punugulu bonda]
     has_template: true
 
   - key: bajji

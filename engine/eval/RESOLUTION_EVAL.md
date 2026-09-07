@@ -396,3 +396,41 @@ lexicon coverage can fix.
 
 **Do not re-tune the floor by eye.** Re-run the sweep; the accuracy plateau extends
 well past the point where abstention breaks, so a value that looks free is not.
+
+---
+
+## Lexicon coverage — audited, three real gaps, filled
+
+The nine regional lexemes that fail held-out (`huli`, `chammanthi`, `chitranna`,
+`mosaranna`, `daddojanam`, `perugannam`, `saaru`, `thenkuzhal`, `majjiga pulusu`)
+were checked against the lexicon: **all nine are already catalogued.** They fail only
+because the ablation removes them. There was nothing missing to add.
+
+Alias coverage is likewise healthy — 264 surface forms across 51 dishes, with only
+four dishes carrying fewer than three aliases.
+
+Native-script coverage looked far worse: ta 39/51, te 21/51, ml 23/51, kn 28/51, or
+93 blanks. Almost all of those are correct absences. `olan` and `kaalan` are Kerala
+dishes and have no Tamil or Telugu name; demanding one would invite somebody to
+invent it. Scoping the check to the regions each dish actually claims —
+TN→ta, KL→ml, KA→kn, AP/TG→te — turns 93 apparent gaps into **three real ones**:
+
+    coconut_rice    claims KL, had no Malayalam name
+    tomato_chutney  claims KA, had no Kannada name
+    bonda           claims AP/TG, had no Telugu name
+
+All three are filled, each marked `# REVIEW` in line with the file's standing warning
+that it needs native-speaker sign-off. Two are direct borrowings (`ಟೊಮೇಟೊ ಚಟ್ನಿ`,
+`బోండా`) and one a compound of common words (`തേങ്ങ ചോറ്`), which is why these three
+were safe to supply and a mass fill of the other 90 would not have been.
+
+Two tests now hold the line: every dish must carry a native name for each region it
+claims, and no surface form may be claimed by two dishes (an ambiguous alias silently
+logs the wrong food).
+
+**The eval numbers do not move, and should not.** New aliases are not in the golden
+query set, so they change nothing measurable — which is the point. Lexicon coverage
+serves users who type words the golden set never asked about. Measuring it would need
+new golden queries, authored independently rather than back-filled from the aliases
+just added; doing that from the alias list is the exact mistake that made the first
+version of this harness report 100%.
