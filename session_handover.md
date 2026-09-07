@@ -1,7 +1,7 @@
 # Session Handover
-_Generated: 2026-09-07T18:41:35Z_
+_Generated: 2026-09-07T18:52:00Z_
 _Branch: phase1/restore-trust_
-_Trigger: usage threshold 95% (286/300 min) | Context at compact: n/a_
+_Trigger: usage threshold 96% (288/300 min) | Context at compact: n/a_
 _Compact count this project: 0_
 
 ---
@@ -14,7 +14,8 @@ fabrications, fix the broken schema) is done and pushed. Phase 2 (real data spin
 partly done: the authoritative ICMR-NIN IFCT 2017 table is ingested and a real engine
 bug it exposed is fixed.
 
-**Phase:** Phase 2 complete (bar appam). Next: Phase 4 (vision) + Phase 5 (evidence).
+**Phase:** Phase 2 complete (bar appam). Phase 3 measured and retargeted (no code
+change — see item 7 under Remaining Work). Next: Phase 4 (vision) + Phase 5 (evidence).
 **Next action:** The user asked to "keep going with the vision and evidence layers".
 NOTHING HAS BEEN STARTED ON EITHER — the working tree is clean at `c25ecb5`.
 Start with the vision fix, which is small and self-contained:
@@ -129,7 +130,7 @@ EVIDENCE (Phase 5, larger — consider a separate session):
 
 ## 🔄 In Progress (Exact Resume Point)
 **Branch:** `phase1/restore-trust` (contains both Phase 1 and Phase 2 commits)
-**Last commit:** `c25ecb5 feat: persist the meal journal; fill composition IFCT does not carry`
+**Last commit:** `8665baf docs: measure the held-out romanised ceiling; correct the Phase 3 target`
 **Working tree:** clean, pushed to origin
 **Next immediate action:** Start the two items under "Active Task → Next action".
 Nothing is half-edited; resume cleanly.
@@ -149,9 +150,19 @@ Nothing is half-edited; resume cleanly.
    copy in `_illustrative_peak()` — keep the two in step.
 5. **`/v1/cgt/telemetry`** — echoes input, stores nothing.
 6. **Appam** — needs coconut milk from USDA FoodData Central (public domain).
-7. **Phase 3 (cheap now)** — romanised resolution is 53.3% top-1, the largest and
-   weakest category. The ingest loaded **1,341 IFCT native-language names** into
-   `ref.food_name` (ta/te/ml/kn) — a direct lever that did not exist before.
+7. **Phase 3 — RETARGETED, see `engine/eval/RESOLUTION_EVAL.md`.** The premise that
+   IFCT names would lift romanised dish resolution was WRONG: IFCT is an ingredient
+   table and carries no dish names; zero of the failing queries appear in it. And the
+   metric was being misread — 9 of 30 romanised queries are distinct regional lexemes
+   ("huli" = Kannada for sambar, nearest sibling 0.18) that no algorithm can derive,
+   so held-out romanised has a **ceiling of 70.0%**, not 100%. Current 53.3% leaves
+   ~5 queries of real headroom. The "romanised >= 80% held-out" gate in the phase
+   plan and the published artifact is unachievable and must be corrected.
+   Reproduce: `PYTHONPATH=. python3 eval/lexeme_ceiling.py`.
+   Remaining genuine work here: (a) the 21 spelling-variant queries — inspect the
+   ones still missing and extend phonetic folding; (b) grow lexicon coverage with
+   regional names, which is how a user typing "huli" gets served; (c) separately,
+   use the 1,341 IFCT names to resolve INGREDIENT mentions, which nothing covers.
 8. **Golden meal dataset** — the safety benchmark suite has nothing to measure
    until ≥50 photographed meals with weighed component masses exist.
 9. Mobile app: hardcoded `http://localhost:8000`, no lockfile, never built.
@@ -176,6 +187,7 @@ Nothing is half-edited; resume cleanly.
 | `meal_type` added beside `meal_slot`, not merged | 9-value app vocabulary vs 6-value clinical grouping; overloading would lose one or corrupt the other | 2026-09-07 |
 | Identity via unverified header, clearly labelled not-auth | Makes `user_id` and per-user paths real and tested without pretending auth exists | 2026-09-07 |
 | Meal deletes are soft | Deleting must not silently rewrite someone's dietary history | 2026-09-07 |
+| Held-out romanised is reported against a 70% ceiling, not 100% | 9 of 30 queries are distinct lexemes no algorithm can derive; quoting 53.3% against an implied 100% points effort at the wrong problem | 2026-09-07 |
 
 ---
 
@@ -233,6 +245,8 @@ PYTHONPATH=. python3 -m pathyam_engine.evaluation # resolution eval, top-1 83.3%
 | db/013_meal_log_app_fields.sql | added |
 | engine/pathyam_engine/authoring/derived_foods.py | added |
 | engine/pathyam_api/journal.py | added |
+| engine/eval/lexeme_ceiling.py | added |
+| engine/eval/RESOLUTION_EVAL.md | appended (ceiling finding) |
 | .env.example | added |
 | .gitignore | modified (.env, .ifctdata/, session state) |
 
@@ -241,7 +255,7 @@ PYTHONPATH=. python3 -m pathyam_engine.evaluation # resolution eval, top-1 83.3%
 ## 🌿 Git Context
 ```
 Branch  : phase1/restore-trust
-Commit  : c25ecb5 feat: persist the meal journal; fill composition IFCT does not carry
+Commit  : 8665baf docs: measure the held-out romanised ceiling; correct the Phase 3 target
 Status  : clean, pushed to origin
 ```
 
