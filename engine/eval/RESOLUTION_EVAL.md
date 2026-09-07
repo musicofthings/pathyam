@@ -254,3 +254,54 @@ rewards changes that fix an artifact rather than a user-visible failure.
 
 **Not attempted here.** Changing ranking without room to re-run the full ablation
 would be unmeasured tuning, which is what this document exists to prevent.
+
+---
+
+## Attempted: coverage-scaled containment. Measured, then reverted.
+
+The flat `_WORD_MATCH_DISCOUNT = 0.94` in `resolution/sources.py` treats every partial
+match alike. Replacing it with a discount that scales with **coverage** — the share of
+the candidate's own words the query accounts for — was implemented and measured:
+
+| | before | after |
+|---|---|---|
+| top-1 (held-out) | 83.3% | **84.1%** |
+| colloquial | 68.8% | **75.0%** |
+| romanised | 53.3% | 53.3% |
+| top-5 | 92.0% | 91.3% |
+| MRR | 0.867 | 0.865 |
+| abstention recall on "should ask" | 100% | **90.9%** |
+
+**Reverted.** The abstention drop breaks
+`test_abstention_catches_every_case_marked_should_ask`, which asserts the resolver
+flags every case the golden set marks as needing confirmation. That is a safety
+property — asking when unsure — and trading it for 0.8 points of top-1 is not a
+trade worth making silently. The colloquial gain is real and the idea is probably
+right; it needs a floor sweep against the abstention invariant, which is the work
+this note exists to hand over.
+
+## Why the dosa cluster is a harness artifact, not a resolver bug
+
+The coverage change did not move romanised at all, and dumping candidates showed why.
+`dosa_plain`'s surface forms are:
+
+    Dosa, plain | dosa | dosai | thosai | dose | dosey | dhosa | plain dosa | sada dosa
+
+Six of those — `dosa`, `dosai`, `thosai`, `dose`, `dosey`, `dhosa` — are themselves
+golden queries. The harness holds out every golden query string at once, so the dish
+is left with only `Dosa, plain`, `plain dosa` and `sada dosa`: **no bare form
+survives**. Meanwhile `dosa_rava` keeps `ravai dosai`, which contains the queried
+token exactly. A one-word query then cannot beat a two-word sibling, whatever the
+scoring does.
+
+This is not the "same alias on two dishes" case — that was checked and there are
+**zero** alias strings shared between dishes, so per-dish holdout is a no-op on this
+lexicon. It is that holding out *all* spellings of a base dish simultaneously models
+a situation that does not occur: in production `dosai` is a catalogued alias of
+`dosa_plain` and resolves exactly.
+
+**Fix the harness before tuning the ranker.** Hold out one alias at a time
+(leave-one-out) rather than the whole golden set at once. That models the real case —
+an unseen spelling of a dish whose *other* spellings are known — and would let a
+ranking change be judged on whether it helps users rather than on whether it can
+recover a dish stripped of every bare name it has.
