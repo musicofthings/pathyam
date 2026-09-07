@@ -280,15 +280,23 @@ class JournalRepository:
         return True
 
 
+# Assumed GI when a logged meal has no measured value. IFCT does not publish GI for
+# most foods, so this is a placeholder in the middle of the range for Indian mixed
+# meals -- another reason the journal's peak figure is illustrative only.
+_ASSUMED_GI = 68.0
+_ASSUMED_BASELINE_MG_DL = 95.0
+
+
 def _illustrative_peak(carbs_g: float, fat_g: float, fibre_g: float) -> float:
-    """Rough postprandial peak, for display only.
+    """Rough postprandial peak for the journal row. Display only.
 
-    NOT a validated clinical model. The coefficients are unsourced -- see the CGT
-    entry in the README's "Known gaps" table. Kept here so the journal renders the
-    same figure the CGT tab does, rather than the two disagreeing.
+    Delegates to pathyam_engine.cgt so the journal and the CGT tab cannot drift
+    apart -- this previously carried its own copy of the same four coefficients.
+    Not a validated model; see that module's docstring.
     """
-    import math
+    from pathyam_engine import cgt
 
-    gl = carbs_g * 0.68
-    spike = max(5.0, gl * 1.8 * math.exp(-0.02 * fat_g) * math.exp(-0.04 * fibre_g))
-    return 95.0 + spike
+    return cgt.predict_curve(
+        carbs_g=carbs_g, gi=_ASSUMED_GI, fibre_g=fibre_g, fat_g=fat_g,
+        baseline_mg_dl=_ASSUMED_BASELINE_MG_DL,
+    ).peak_mg_dl

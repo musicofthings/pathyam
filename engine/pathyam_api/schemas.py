@@ -380,6 +380,12 @@ class GlycemicResponsePrediction(BaseModel):
     iauc_mg_dl_min: float
     glycemic_load: float
     curve: list[GlycemicCurvePoint]
+    # Travels with every response so a client cannot render the curve without also
+    # having been told what it is. is_validated is False and stays False until the
+    # coefficients are fitted against real CGM traces.
+    model_id: str
+    is_validated: bool
+    disclaimer: str
 
 
 # ------------------------------------------------------- Perception / Camera ----

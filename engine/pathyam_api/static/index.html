@@ -863,7 +863,8 @@ async function fetchAndRenderCGT(data) {
 
     metricsEl.innerHTML = `Peak: <b>${cgt.peak_mg_dl} mg/dL</b> (+${Math.round(cgt.peak_mg_dl - cgt.baseline_mg_dl)} mg/dL at t=${cgt.time_to_peak_min}m) · ` +
                           `Glycemic Load: <b>${cgt.glycemic_load}</b> · ` +
-                          `iAUC: <b>${Math.round(cgt.iauc_mg_dl_min)}</b> mg/dL·min`;
+                          `iAUC: <b>${Math.round(cgt.iauc_mg_dl_min)}</b> mg/dL·min` +
+                          cgtDisclaimer(cgt);
 
     drawCGTGraphCanvas(canvas, cgt);
   } catch (err) {}
@@ -1074,7 +1075,8 @@ async function updateCGTSimulation() {
 
     metricsEl.innerHTML = `Peak Spike: <b>${cgt.peak_mg_dl} mg/dL</b> (+${Math.round(cgt.peak_mg_dl - cgt.baseline_mg_dl)} mg/dL at t=${cgt.time_to_peak_min}m) · ` +
                           `Glycemic Load: <b>${cgt.glycemic_load}</b> · ` +
-                          `iAUC: <b>${Math.round(cgt.iauc_mg_dl_min)}</b> mg/dL·min`;
+                          `iAUC: <b>${Math.round(cgt.iauc_mg_dl_min)}</b> mg/dL·min` +
+                          cgtDisclaimer(cgt);
 
     drawCGTGraphCanvas(canvas, cgt);
   } catch (err) {}
@@ -1124,6 +1126,17 @@ async function loadRecipeCatalog() {
   } catch(err) {
     $('#recipe-catalog-list').innerHTML = '<p class="empty-state">Failed to load recipe templates.</p>';
   }
+}
+
+// The CGT curve is an illustration, not a prediction. The API says so in every
+// response (is_validated / disclaimer); this makes sure a person reading the number
+// is told the same thing, right next to it.
+function cgtDisclaimer(cgt) {
+  if (cgt && cgt.is_validated) return '';
+  const text = (cgt && cgt.disclaimer) || 'Illustrative only — not a validated clinical model.';
+  return `<div style="margin-top:0.6rem;padding:0.55rem 0.7rem;border-left:3px solid var(--accent-amber,#F59E0B);` +
+         `background:rgba(245,158,11,0.10);border-radius:6px;font-size:0.78rem;font-weight:600;` +
+         `color:var(--text-secondary);line-height:1.45;">⚠ ${esc(text)}</div>`;
 }
 
 // RSS NEWS FEED API

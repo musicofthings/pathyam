@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository
+from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository, cgt
 from pathyam_engine.distributions import PriorError
 from pathyam_engine.expressions import ExpressionError
 from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
@@ -762,46 +762,39 @@ def receive_cgt_telemetry(req: s.CGTTelemetryRequest) -> s.CGTTelemetryResponse:
     )
 
 
-@app.post("/v1/cgt/predict_spike", response_model=s.GlycemicResponsePrediction, tags=["cgt"])
+@app.post("/v1/cgt/predict_spike", response_model=s.GlycemicResponsePrediction,
+          tags=["cgt"])
 def predict_glycemic_spike(req: s.GlycemicResponseRequest) -> s.GlycemicResponsePrediction:
-    """Predict postprandial glucose spike curve from meal composition and Glycemic Load (GL).
+    """Draw an ILLUSTRATIVE postprandial glucose curve.
 
-    Physiological Model:
-        GL = (Carbs_g * GI / 100) * Servings
-        Peak Spike = GL * 1.8 * exp(-0.02 * Fat - 0.04 * Fibre)
-        Curve: G(t) = Baseline + Spike * (t / t_peak) * exp(1 - t / t_peak)
+    Not a validated clinical model, and the response says so in three fields:
+    `model_id`, `is_validated` (False) and `disclaimer`. Glycemic load is computed by
+    its standard definition from a caller-supplied GI; the adjustments for fat and
+    fibre are directionally sound but their coefficients are unsourced tuning. See
+    `pathyam_engine/cgt.py` for what is supported and what is not.
+
+    Do not present the output as a prediction of what a person's glucose will do.
     """
-    import math
-
-    gl = (req.carbs_g * req.gi / 100.0) * req.servings
-    fat_damping = math.exp(-0.02 * req.fat_g)
-    fibre_damping = math.exp(-0.04 * req.fibre_g)
-    peak_spike_mg_dl = max(5.0, gl * 1.8 * fat_damping * fibre_damping)
-    time_to_peak = int(45 + min(45, req.fat_g * 1.5))
-    peak_glucose = req.baseline_mg_dl + peak_spike_mg_dl
-
-    curve_points: list[s.GlycemicCurvePoint] = []
-    iauc = 0.0
-    for t in range(0, 185, 5):
-        if t == 0:
-            g_t = req.baseline_mg_dl
-        else:
-            rel_t = t / float(time_to_peak)
-            g_t = req.baseline_mg_dl + peak_spike_mg_dl * rel_t * math.exp(1.0 - rel_t)
-        curve_points.append(s.GlycemicCurvePoint(time_minutes=t, glucose_mg_dl=round(g_t, 1)))
-        if t > 0:
-            prev_g = curve_points[-2].glucose_mg_dl
-            # trapezoidal integration of incremental area above baseline
-            inc_g = max(0.0, ((g_t + prev_g) / 2.0) - req.baseline_mg_dl)
-            iauc += inc_g * 5.0
-
-    return s.GlycemicResponsePrediction(
+    curve = cgt.predict_curve(
+        carbs_g=req.carbs_g,
+        gi=req.gi,
+        fibre_g=req.fibre_g,
+        fat_g=req.fat_g,
+        servings=req.servings,
         baseline_mg_dl=req.baseline_mg_dl,
-        peak_mg_dl=round(peak_glucose, 1),
-        time_to_peak_min=time_to_peak,
-        iauc_mg_dl_min=round(iauc, 1),
-        glycemic_load=round(gl, 1),
-        curve=curve_points,
+    )
+    return s.GlycemicResponsePrediction(
+        baseline_mg_dl=curve.baseline_mg_dl,
+        peak_mg_dl=curve.peak_mg_dl,
+        time_to_peak_min=curve.time_to_peak_min,
+        iauc_mg_dl_min=curve.iauc_mg_dl_min,
+        glycemic_load=curve.glycemic_load,
+        curve=[s.GlycemicCurvePoint(time_minutes=p.time_minutes,
+                                    glucose_mg_dl=p.glucose_mg_dl)
+               for p in curve.curve],
+        model_id=curve.model_id,
+        is_validated=curve.is_validated,
+        disclaimer=curve.disclaimer,
     )
 
 

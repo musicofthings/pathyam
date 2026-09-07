@@ -41,8 +41,8 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 | **Appam template** | Blocked on coconut milk first/second extract, which IFCT 2017 does not carry. These are preparations whose composition depends on the kernel-to-water ratio; picking one would be inventing the number. Next source is USDA FoodData Central (public domain), per the dossier's documented fallback order. | Phase 2 |
 | **Evidence retrieval is a keyword matcher** | One arm: term overlap over a 3-document in-memory corpus. No BM25, no Postgres FTS, no pgvector — the module now says so rather than claiming otherwise. Making it real needs the corpus in Postgres and an embedding provider this repo has no credentials for. | Phase 5 |
 | **Evidence corpus is 3 documents** | Enough to exercise the pipeline, not enough to answer clinical questions. | Phase 5 |
-| **CGT glycemic prediction** | `predict_spike` coefficients (1.8, −0.02, −0.04) have no cited derivation. The curve shape and trapezoidal iAUC are correctly implemented; the constants are not sourced. **Do not present its output as clinical guidance.** | Phase 6 |
-| **`/v1/cgt/telemetry`** | Echoes its input. Stores nothing, used by nothing. | Phase 6 |
+| **CGT curve is illustrative, not predictive** | Relabelled rather than sourced: the coefficients could not be cited because they are not published values. Glycemic load is standard; the fat and fibre adjustments are directionally supported but their magnitudes are tuning. Every response carries `is_validated: false` and a disclaimer, and the UI renders it. Making it real needs paired CGM traces and weighed meal records. | Phase 6 |
+| **`/v1/cgt/telemetry`** | Echoes its input. Stores nothing, used by nothing. Until it persists, there is no CGM data to fit the curve against. | Phase 6 |
 | **Safety benchmarks** | The suite computes correctly, but **no golden meal dataset exists** — the only samples are two synthetic rows in a unit test. It has nothing to measure. | Phase 4 |
 | **Mobile app** | `apps/mobile` has never been installed or built and has no lockfile. Expo 51 / React Native 0.74. | Phase 6 |
 
@@ -94,7 +94,7 @@ flowchart TD
         C3["FAO/INFOODS QC gates"]:::done
         C4["IFCT 2017 composition — 542 foods in Postgres"]:::done
         C5["Coconut milk extracts (USDA fallback)"]:::pending
-        C6["CGT glycemic prediction<br/>(unsourced coefficients)"]:::partial
+        C6["CGT curve<br/>(illustrative, labelled)"]:::partial
     end
 
     subgraph API_UI["4. API & UI"]
