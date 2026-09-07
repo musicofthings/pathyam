@@ -26,6 +26,7 @@ The compute core is real and tested. Several surrounding features are scaffoldin
 | **REST API** | `/v1/resolve`, `/v1/compute`, `/v1/log`, `/v1/history`, `/v1/templates`, `/v1/news/rss`, `/v1/evidence/explain`. |
 | **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
 | **Web UI** | Single-page app, 6 tabs, served same-origin from `pathyam_api/static/`. Relative API paths throughout. |
+| **Vision fails honestly** | No default model id, no silent mock fallback. Missing key or model → 501; upstream failure → 502. The offline mock is reachable only via `PATHYAM_MOCK_VISION` and is stamped `model_version="mock"`. |
 
 ### Known gaps
 
@@ -33,8 +34,8 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 
 | Gap | What actually happens | Planned |
 |---|---|---|
-| **Meal photo vision** | The configured model id `gemini-3.7-flash` is not a real Gemini model. Any live call fails, and the failure is swallowed — the provider returns a **hardcoded dosa-and-sambar observation** that the caller cannot distinguish from a real reading. | Phase 4 |
-| **`/v1/perception/analyze`** | Never reads the uploaded image. Defaults to `"masala dosa"` and returns a fixed bounding box and confidence. | Phase 4 |
+| **Meal photo vision — unverified end to end** | The provider now fails loudly instead of faking, but no live call has been made from this repo: there is no API key here, so `PATHYAM_VISION_MODEL` has never been exercised against a real model. Set a key and a model id you have confirmed with `client.models.list()`, then verify before trusting it. | Phase 4 |
+| **Portion accuracy is unmeasured** | No golden meal dataset exists, so portion MAPE and nutrient error are unknown. Vision output must not be presented as accurate until ≥50 photographed meals with weighed component masses are collected. | Phase 4 |
 | **Authentication** | There is none. `X-Pathyam-User` is an unverified, self-asserted header — it makes the persistence layer genuinely per-user, but it is not a credential and anyone who can reach the API can claim any user. | Phase 6 |
 | **Appam template** | Blocked on coconut milk first/second extract, which IFCT 2017 does not carry. These are preparations whose composition depends on the kernel-to-water ratio; picking one would be inventing the number. Next source is USDA FoodData Central (public domain), per the dossier's documented fallback order. | Phase 2 |
 | **Evidence retrieval** | `search_semantic` returns `search_lexical` unchanged — there is no pgvector and no Postgres FTS, so reciprocal rank fusion merges two identical rankings. The corpus is 3 documents in a Python list. | Phase 5 |
@@ -77,7 +78,7 @@ flowchart TD
     subgraph INPUT["1. Input"]
         A1["Natural text<br/>(Tamil, Kannada, Telugu, Malayalam, English)"]:::done
         A2["Meal photo upload"]:::partial
-        A3["VLM perception"]:::broken
+        A3["VLM perception<br/>(fails loudly; unverified live)"]:::partial
     end
 
     subgraph RESOLUTION["2. Probabilistic entity resolution"]

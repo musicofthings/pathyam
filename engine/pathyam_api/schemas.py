@@ -394,14 +394,17 @@ class PerceptionRequest(BaseModel):
 class PerceptionDetectedObject(BaseModel):
     dish_name: str
     confidence: float
-    vessel: str = "steel_plate"
-    bbox: list[float] = Field(default_factory=lambda: [0.1, 0.1, 0.9, 0.9])
+    # None means the model did not report one. These previously defaulted to
+    # "steel_plate" and a fixed bounding box, which meant every response carried a
+    # vessel and a box that nothing had actually observed.
+    vessel: str | None = None
+    bbox: list[float] | None = None
 
 
 class PerceptionResponse(BaseModel):
     detected_dishes: list[PerceptionDetectedObject]
-    vessel: str
-    reference_object: str = "spoon"
+    vessel: str | None = None
+    reference_object: str | None = None
     estimated_portion_scale: float = 1.0
     parameter_estimates: dict[str, float] = Field(default_factory=dict)
     resolution: ResolveResponse

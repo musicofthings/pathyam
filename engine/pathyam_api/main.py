@@ -28,7 +28,8 @@ from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository
 from pathyam_engine.distributions import PriorError
 from pathyam_engine.expressions import ExpressionError
 from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
-from pathyam_engine.vision import GeminiVisionProvider, evaluate_image_quality
+from pathyam_engine.vision import (GeminiVisionProvider, VisionError,
+                                   VisionNotConfigured, evaluate_image_quality)
 from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 
 from . import schemas as s
@@ -302,7 +303,14 @@ async def resolve_meal_vision(
 
     # 2. Vision Extractor (Gemini 3.7 Flash)
     provider = GeminiVisionProvider()
-    meal_obs = await provider.analyse_meal(image_bytes)
+    try:
+        meal_obs = await provider.analyse_meal(image_bytes)
+    except VisionNotConfigured as exc:
+        # 501: the server has no vision capability wired up. Distinct from 503, which
+        # would imply "try again" — no amount of retrying configures a model.
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except VisionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # 3. Entity Resolver over each visual item label
     obs_items: list[s.VisionObservationItem] = []
@@ -801,23 +809,82 @@ def predict_glycemic_spike(req: s.GlycemicResponseRequest) -> s.GlycemicResponse
 
 
 @app.post("/v1/perception/analyze", response_model=s.PerceptionResponse, tags=["perception"])
-def analyze_perception(req: s.PerceptionRequest, svc: _Services = Depends(get_services)) -> s.PerceptionResponse:
-    """VLM Perception Pipeline: Analyze meal photo, identify dishes, vessel & estimated portion size."""
-    hint = (req.user_hint or "masala dosa").strip()
-    resolved = resolve(s.ResolveRequest(text=hint, limit=5), svc=svc)
+async def analyze_perception(
+    req: s.PerceptionRequest,
+    svc: _Services = Depends(get_services),
+) -> s.PerceptionResponse:
+    """Read a meal photo: what is on the plate, and roughly how much of it.
+
+    This used to ignore the image entirely -- it defaulted `user_hint` to
+    "masala dosa" and returned a fixed bounding box at confidence 0.88 whatever you
+    sent it. It now decodes the image, runs the quality gate, and asks the vision
+    provider. With no vision configured it returns 501 rather than a fabricated
+    plate, and with no image it returns 422: there is nothing to perceive.
+
+    `user_hint` is used only to help resolve what the model reports. It is never a
+    substitute for looking.
+    """
+    import base64
+
+    if not req.image_base64:
+        raise HTTPException(
+            status_code=422,
+            detail="image_base64 is required; perception without an image is a guess",
+        )
+
+    try:
+        image_bytes = base64.b64decode(req.image_base64, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"image_base64 is not valid base64: {exc}") from exc
+
+    gate = evaluate_image_quality(image_bytes)
+    if not gate.passed:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason": "image failed the quality gate", "issues": gate.issues},
+        )
+
+    provider = GeminiVisionProvider()
+    try:
+        observation = await provider.analyse_meal(image_bytes)
+    except VisionNotConfigured as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except VisionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not observation.items:
+        raise HTTPException(status_code=422, detail="no food was identified in this image")
+
+    # Resolve what the model reported, not what the caller hinted.
+    lead = observation.items[0]
+    resolved = resolve(
+        s.ResolveRequest(text=(req.user_hint or lead.visual_label).strip(), limit=5),
+        svc=svc,
+    )
+
+    detected = [
+        s.PerceptionDetectedObject(
+            dish_name=item.visual_label,
+            confidence=item.confidence,
+            vessel=None,
+            bbox=None,
+        )
+        for item in observation.items
+    ]
+
+    # Portion priors come from the model as masses with uncertainty; they are passed
+    # to the engine as priors, never as pinned values. The engine widens or narrows
+    # its interval accordingly -- which is the whole point of not returning a number.
+    estimates: dict[str, float] = {}
+    if lead.estimated_portion.grams is not None:
+        estimates["observed_portion_g"] = lead.estimated_portion.grams
+
     return s.PerceptionResponse(
-        detected_dishes=[
-            s.PerceptionDetectedObject(
-                dish_name=hint,
-                confidence=0.88,
-                vessel="steel_plate",
-                bbox=[0.15, 0.20, 0.85, 0.80]
-            )
-        ],
-        vessel="steel_plate",
-        reference_object="spoon",
+        detected_dishes=detected,
+        vessel=None,
+        reference_object=None,
         estimated_portion_scale=1.0,
-        parameter_estimates={"batter_g": 90.0, "fat_g": 8.0},
+        parameter_estimates=estimates,
         resolution=resolved,
     )
 
