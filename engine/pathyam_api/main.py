@@ -234,6 +234,30 @@ def current_user(
     )
 
 
+def require_consent(svc: _Services, user_id: str, purpose_key: str) -> None:
+    """Refuse a write when the user has not consented to its purpose.
+
+    403 rather than 401: the caller is authenticated, they simply have not agreed to
+    this processing. The message names the purpose and how to grant it, because a
+    bare "forbidden" on a meal log is indistinguishable from a bug.
+
+    A user row created implicitly on first write (the development identity path) has
+    no consent records and is refused here. That is correct — it has never been shown
+    a notice — and the one seeded development user is granted consent visibly in
+    db/017 rather than by a special case in this function.
+    """
+    if svc.auth.has_consent(user_id, purpose_key):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "reason": "consent required",
+            "purpose": purpose_key,
+            "grant_with": f"POST /v1/auth/consent/{purpose_key}",
+        },
+    )
+
+
 # --------------------------------------------------------------------- auth ----
 
 
@@ -625,8 +649,9 @@ def log(
         warnings=list(svc.source.warnings),
     )
 
-    # Persist. Previously this appended to a module-level list, so history was lost
-    # on restart and shared between every caller.
+    # Storing a meal log is processing personal data for the core service purpose.
+    require_consent(svc, user_id, "core_service")
+
     svc.journal.insert_entry(
         user_id=user_id,
         entry_id=entry_id,
@@ -885,6 +910,11 @@ def receive_cgt_telemetry(
     yet enforced here — there is no authentication, so there is no authenticated
     subject whose consent could be checked.
     """
+    # Glucose telemetry is an optional purpose and a continuous trace is more
+    # revealing than any single reading, so it is granted separately from the
+    # core service and checked on every write.
+    require_consent(svc, user_id, "cgm_telemetry")
+
     accepted, duplicates = svc.glucose.ingest(user_id, req.readings)
 
     return s.CGTTelemetryResponse(

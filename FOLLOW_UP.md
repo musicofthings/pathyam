@@ -1,6 +1,6 @@
 # Pathyam — what was done, and what needs you
 
-_Written 2026-09-08. Branch `phase1/restore-trust`, all pushed, suite green at 349._
+_Written 2026-09-08. Branch `phase1/restore-trust`, all pushed, suite green at 353._
 
 This session started as a repo review and turned into six phases of work. The short
 version: the codebase contained a lot of confident-looking fabrication, that is gone,
@@ -33,9 +33,10 @@ you can authorise or supply.
 
 ## 🟢 Engineering left — I could do these
 
+_(Consent enforcement, formerly item 9, is done — see `d0a...` below.)_
+
 | # | What | Notes |
 |---|---|---|
-| 9 | Enforce consent at write time | Purposes are granted and recorded; `/v1/cgt/telemetry` does not yet refuse a write when `cgm_telemetry` is absent. Small. |
 | 10 | Password reset + email verification | Needs somewhere to send mail. An account whose password is forgotten is currently unrecoverable. |
 | 11 | Per-IP rate limiting | Only per-account lockout exists (8 attempts). Belongs at the edge, not in the app. |
 | 12 | Semantic retrieval (pgvector) | Needs an embedding provider. `reciprocal_rank_fusion` is correct and unused until a second arm exists. I would not add a stub returning lexical results under a semantic name — that is what I removed. |

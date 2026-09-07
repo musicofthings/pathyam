@@ -306,12 +306,31 @@ class AuthRepository:
         import json
 
         with self._conn.cursor() as cur:
+            # Granting consent is itself the act that establishes an unregistered
+            # user, so the row has to exist for the foreign key. Otherwise a
+            # development-identity caller could never consent to anything: writes
+            # need consent, and the user row was only created by a write.
+            cur.execute(
+                """INSERT INTO app.app_user (user_id, preferred_lang, is_anonymised)
+                   VALUES (%s, 'en', true) ON CONFLICT (user_id) DO NOTHING""",
+                (user_id,),
+            )
+            # Idempotent: user_consent_active_idx is UNIQUE on (user_id,
+            # purpose_id) while active, so re-granting a live consent would raise.
+            # A client tapping the same toggle twice is not an error, and a 500 on
+            # a consent screen is a good way to make someone give up on granting it.
             cur.execute(
                 """INSERT INTO app.user_consent
                        (user_id, purpose_id, notice_version, notice_lang, evidence)
-                   SELECT %s, purpose_id, %s, %s, %s
-                     FROM app.consent_purpose WHERE purpose_key = %s""",
+                   SELECT %s, p.purpose_id, %s, %s, %s
+                     FROM app.consent_purpose p
+                    WHERE p.purpose_key = %s
+                      AND NOT EXISTS (
+                            SELECT 1 FROM app.user_consent c
+                             WHERE c.user_id = %s AND c.purpose_id = p.purpose_id
+                               AND c.withdrawn_at IS NULL
+                      )""",
                 (user_id, notice_version, notice_lang,
-                 json.dumps(evidence or {}), purpose_key),
+                 json.dumps(evidence or {}), purpose_key, user_id),
             )
         self._conn.commit()

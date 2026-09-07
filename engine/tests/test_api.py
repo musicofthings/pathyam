@@ -264,8 +264,9 @@ def test_log_unknown_query_graceful_fallback(client):
 
 
 def test_cgt_telemetry_and_predict_spike(client):
-    t_resp = client.post("/v1/cgt/telemetry", json={
-        "user_id": "b0000000-0000-0000-0000-0000000000b1",
+    _consent(client, "b0000000-0000-0000-0000-0000000000b1", "cgm_telemetry")
+    t_resp = client.post("/v1/cgt/telemetry", headers={
+        "X-Pathyam-User": "b0000000-0000-0000-0000-0000000000b1"}, json={
         "readings": [{"timestamp": "2026-08-14T08:30:00Z", "glucose_mg_dl": 98.5, "trend_arrow": "flat"}]
     })
     assert t_resp.status_code == 200
@@ -354,6 +355,19 @@ def test_news_feed_is_empty_when_pubmed_is_unreachable(client, monkeypatch):
     assert body["articles"] == []
 
 
+def _consent(client, user, *purposes):
+    """Grant consent for a development-identity user.
+
+    Writes are refused without it, deliberately: a user row created implicitly on
+    first write has never been shown a notice. Tests grant it explicitly, which is
+    what a real client does at sign-up.
+    """
+    for purpose in purposes:
+        response = client.post(f"/v1/auth/consent/{purpose}",
+                               headers={"X-Pathyam-User": user})
+        assert response.status_code == 200, response.text
+
+
 # ----------------------------------------------------------- meal journal ----
 #
 # The journal used to be a module-level Python list: history vanished on restart and
@@ -396,6 +410,7 @@ def test_one_users_journal_is_invisible_to_another(client):
     """user_id is a real column, not decoration."""
     alice = "11111111-1111-1111-1111-111111111111"
     bob = "22222222-2222-2222-2222-222222222222"
+    _consent(client, alice, "core_service")
 
     posted = client.post(
         "/v1/log", json={"text": "1 dosa", "n_samples": 120},
@@ -414,6 +429,7 @@ def test_one_users_journal_is_invisible_to_another(client):
 def test_deleting_a_meal_is_soft_and_scoped_to_its_owner(client):
     owner = "33333333-3333-3333-3333-333333333333"
     stranger = "44444444-4444-4444-4444-444444444444"
+    _consent(client, owner, "core_service")
 
     entry_id = client.post(
         "/v1/log", json={"text": "1 idli", "n_samples": 120},
@@ -441,6 +457,7 @@ def test_deleting_a_meal_is_soft_and_scoped_to_its_owner(client):
 
 def test_portion_adjustment_scales_the_recorded_nutrients(client):
     user = "55555555-5555-5555-5555-555555555555"
+    _consent(client, user, "core_service")
     entry_id = client.post(
         "/v1/log", json={"text": "1 idli", "n_samples": 120},
         headers={"X-Pathyam-User": user},
@@ -468,6 +485,7 @@ def test_portion_adjustment_scales_the_recorded_nutrients(client):
 
 def test_portions_never_drop_to_zero_or_below(client):
     user = "66666666-6666-6666-6666-666666666666"
+    _consent(client, user, "core_service")
     entry_id = client.post(
         "/v1/log", json={"text": "1 idli", "n_samples": 120},
         headers={"X-Pathyam-User": user},
@@ -530,6 +548,7 @@ def _readings(start="2026-03-01T08:00:00+00:00", n=3, first=95.0):
 
 def test_glucose_readings_are_stored_not_echoed(client):
     user = "a0000000-0000-0000-0000-0000000000a1"
+    _consent(client, user, "cgm_telemetry")
     body = client.post(
         "/v1/cgt/telemetry", json={"readings": _readings()},
         headers={"X-Pathyam-User": user},
@@ -543,6 +562,7 @@ def test_glucose_readings_are_stored_not_echoed(client):
 def test_a_replayed_batch_updates_rather_than_duplicating(client):
     """Sensors resend on reconnect; a doubled reading would bias any fitted model."""
     user = "a0000000-0000-0000-0000-0000000000a2"
+    _consent(client, user, "cgm_telemetry")
     payload = {"readings": _readings(start="2026-03-02T08:00:00+00:00")}
 
     first = client.post("/v1/cgt/telemetry", json=payload,
@@ -559,6 +579,8 @@ def test_a_replayed_batch_updates_rather_than_duplicating(client):
 def test_one_users_readings_are_invisible_to_another(client):
     alice = "a0000000-0000-0000-0000-0000000000a3"
     bob = "a0000000-0000-0000-0000-0000000000a4"
+    _consent(client, alice, "cgm_telemetry")
+    _consent(client, bob, "cgm_telemetry")
 
     client.post("/v1/cgt/telemetry",
                 json={"readings": _readings(start="2026-03-03T08:00:00+00:00")},
@@ -579,6 +601,7 @@ def test_readings_pair_back_to_the_meal_that_preceded_them(client):
     import datetime
 
     user = "a0000000-0000-0000-0000-0000000000a5"
+    _consent(client, user, "core_service", "cgm_telemetry")
     logged = client.post(
         "/v1/log", json={"text": "2 idli", "n_samples": 120},
         headers={"X-Pathyam-User": user},
@@ -610,7 +633,11 @@ def test_readings_pair_back_to_the_meal_that_preceded_them(client):
 
 
 def test_an_out_of_range_reading_is_rejected(client):
-    """Outside 40-450 mg/dL is a sensor error, not a measurement."""
+    """Outside 40-450 mg/dL is a sensor error, not a measurement.
+
+    422 comes from request validation, before the consent check — a malformed
+    payload should not need consent to be told it is malformed.
+    """
     response = client.post(
         "/v1/cgt/telemetry",
         json={"readings": [{"timestamp": "2026-03-04T08:00:00+00:00",
@@ -702,3 +729,64 @@ def test_the_unverified_dev_header_is_refused_in_production(client, monkeypatch)
     )
     assert response.status_code == 401
     assert "authentication required" in response.json()["detail"]
+
+
+# ------------------------------------------------------ consent enforcement ----
+
+def test_a_meal_log_is_refused_without_core_service_consent(client):
+    user = "d0000000-0000-0000-0000-0000000000d1"
+    response = client.post("/v1/log", json={"text": "2 idli", "n_samples": 120},
+                           headers={"X-Pathyam-User": user})
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["purpose"] == "core_service"
+    # The message must say how to fix it: a bare 403 on a meal log is
+    # indistinguishable from a bug.
+    assert detail["grant_with"] == "POST /v1/auth/consent/core_service"
+
+
+def test_glucose_telemetry_is_refused_without_its_own_consent(client):
+    """core_service is not enough. A continuous trace is granted separately."""
+    user = "d0000000-0000-0000-0000-0000000000d2"
+    _consent(client, user, "core_service")
+
+    refused = client.post(
+        "/v1/cgt/telemetry", json={"readings": _readings()},
+        headers={"X-Pathyam-User": user},
+    )
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["purpose"] == "cgm_telemetry"
+
+    _consent(client, user, "cgm_telemetry")
+    accepted = client.post(
+        "/v1/cgt/telemetry", json={"readings": _readings()},
+        headers={"X-Pathyam-User": user},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["accepted"] == 3
+
+
+def test_registering_records_consent_for_the_required_purposes(client):
+    """A real client consents at sign-up; nothing implicit is assumed later."""
+    session = client.post("/v1/auth/register", json={
+        "email": "consent-test@example.com",
+        "password": "a-sufficiently-long-password",
+    }).json()
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    assert client.post("/v1/log", json={"text": "2 idli", "n_samples": 120},
+                       headers=auth).status_code == 200
+    # But the optional purpose is NOT granted by signing up.
+    assert client.post("/v1/cgt/telemetry", json={"readings": _readings()},
+                       headers=auth).status_code == 403
+
+
+def test_granting_the_same_consent_twice_is_not_an_error(client):
+    """user_consent_active_idx is unique while active; a double tap must not 500."""
+    user = "d0000000-0000-0000-0000-0000000000d3"
+    for _ in range(3):
+        response = client.post("/v1/auth/consent/core_service",
+                               headers={"X-Pathyam-User": user})
+        assert response.status_code == 200
+        assert response.json()["granted"] is True
