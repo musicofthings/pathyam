@@ -130,7 +130,7 @@ EVIDENCE (Phase 5, larger — consider a separate session):
 
 ## 🔄 In Progress (Exact Resume Point)
 **Branch:** `phase1/restore-trust` (contains both Phase 1 and Phase 2 commits)
-**Last commit:** `8665baf docs: measure the held-out romanised ceiling; correct the Phase 3 target`
+**Last commit:** `d601e5c docs: diagnose the dosa-cluster failures; locate the fix outside trigram.py`
 **Working tree:** clean, pushed to origin
 **Next immediate action:** Start the two items under "Active Task → Next action".
 Nothing is half-edited; resume cleanly.
@@ -159,10 +159,28 @@ Nothing is half-edited; resume cleanly.
    ~5 queries of real headroom. The "romanised >= 80% held-out" gate in the phase
    plan and the published artifact is unachievable and must be corrected.
    Reproduce: `PYTHONPATH=. python3 eval/lexeme_ceiling.py`.
-   Remaining genuine work here: (a) the 21 spelling-variant queries — inspect the
-   ones still missing and extend phonetic folding; (b) grow lexicon coverage with
-   regional names, which is how a user typing "huli" gets served; (c) separately,
-   use the 1,341 IFCT names to resolve INGREDIENT mentions, which nothing covers.
+   **Spelling-variant work is DIAGNOSED, NOT IMPLEMENTED** — see the second new
+   section in `engine/eval/RESOLUTION_EVAL.md`. The dosa cluster (6 of 23 failures)
+   is caused by two things, measured:
+     (1) `word_similarity('dosai','ravai dosai')` = 1.000 vs `('dosai','dosa')` =
+         0.571 — an unmatched qualifier costs nothing, so a qualified variant wins
+         on a token the base dish lost to holdout. FIX GOES IN `resolver._rerank`,
+         NOT in `trigram.word_similarity` (that module is bug-compatible with
+         pg_trgm on purpose; changing it breaks offline==production ranking).
+         Add a coverage discount (share of the candidate's own words the query
+         leaves unexplained) AND let the phonetic signal win — phonetic
+         ('dosai','dosa') is 1.000 but the resolver prefers the higher trigram.
+         A naive coverage floor of 0.6 alone is NOT enough (0.752 vs 0.537).
+     (2) `holdout` strips a string from EVERY dish, so dosa_plain loses "dosai"
+         while dosa_rava keeps "ravai dosai". Part of the 53.3% is a measurement
+         artifact. Consider per-dish holdout before tuning, or the harness will
+         reward fixing the artifact.
+   Whoever picks this up: make the change, then re-run BOTH
+   `python3 -m pathyam_engine.evaluation` (top-1/top-5/MRR + ablation) and
+   `python3 eval/lexeme_ceiling.py`, and report against the 70% ceiling.
+   Other remaining work: grow lexicon coverage with regional names (how a user
+   typing "huli" gets served); and use the 1,341 IFCT names to resolve INGREDIENT
+   mentions, which nothing covers today.
 8. **Golden meal dataset** — the safety benchmark suite has nothing to measure
    until ≥50 photographed meals with weighed component masses exist.
 9. Mobile app: hardcoded `http://localhost:8000`, no lockfile, never built.
@@ -255,7 +273,7 @@ PYTHONPATH=. python3 -m pathyam_engine.evaluation # resolution eval, top-1 83.3%
 ## 🌿 Git Context
 ```
 Branch  : phase1/restore-trust
-Commit  : 8665baf docs: measure the held-out romanised ceiling; correct the Phase 3 target
+Commit  : d601e5c docs: diagnose the dosa-cluster failures; locate the fix outside trigram.py
 Status  : clean, pushed to origin
 ```
 
