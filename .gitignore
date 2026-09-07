@@ -25,9 +25,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Claude Code session tooling state (context-engineering-kit)
+# Claude Code session tooling state (context-engineering-kit).
+# session_handover.md IS tracked — it is the cross-device resume document.
 .claude/session/
-session_handover.md
 
 # Secrets — never commit
 .env
