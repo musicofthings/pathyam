@@ -26,7 +26,8 @@ from typing import Any
 
 from . import schemas as s
 
-__all__ = ["DEV_USER_ID", "resolve_user_id", "JournalRepository", "GlucoseRepository"]
+__all__ = ["DEV_USER_ID", "resolve_user_id", "dev_identity_allowed",
+           "JournalRepository", "GlucoseRepository"]
 
 # Matches the row seeded by db/013_meal_log_app_fields.sql.
 DEV_USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -46,15 +47,30 @@ _SLOT_FOR_MEAL_TYPE = {
 }
 
 
-def resolve_user_id(header_value: str | None) -> str:
-    """Return the user this request acts for.
+# Set PATHYAM_ALLOW_DEV_IDENTITY=1 to keep accepting the old unverified
+# X-Pathyam-User header. It exists so the existing test suite and local development
+# keep working; it is refused when PATHYAM_ENV=production, because a self-asserted
+# identity header alongside real authentication is a way in, not a convenience.
+_DEV_IDENTITY_ENV = "PATHYAM_ALLOW_DEV_IDENTITY"
 
-    Accepts an ``X-Pathyam-User`` header carrying a UUID so that multi-user
-    behaviour can be exercised end to end. This is NOT authentication -- the header
-    is unverified and self-asserted, and must not be treated as a credential. It
-    exists so the persistence layer is genuinely per-user before auth is built.
+
+def dev_identity_allowed() -> bool:
+    import os
+
+    if os.environ.get("PATHYAM_ENV", "development") == "production":
+        return False
+    return os.environ.get(_DEV_IDENTITY_ENV, "1").strip() not in ("", "0", "false")
+
+
+def resolve_user_id(header_value: str | None) -> str:
+    """Resolve an UNVERIFIED identity header. Development only.
+
+    Superseded by real authentication (``pathyam_api.auth``). This is retained for
+    local development and for the tests written before auth existed, is refused in
+    production, and must never be treated as a credential: the header is
+    self-asserted and proves nothing.
     """
-    if header_value:
+    if header_value and dev_identity_allowed():
         try:
             return str(uuid.UUID(header_value))
         except (ValueError, AttributeError):

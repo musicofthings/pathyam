@@ -341,6 +341,23 @@ class RSSFeedResponse(BaseModel):
 # ------------------------------------------------------- CGT / CGM Telemetry ----
 
 
+class RegisterRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=10, description="At least 10 characters.")
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthSession(BaseModel):
+    access_token: str = Field(description="Bearer token. Shown once; not recoverable.")
+    token_type: str = "bearer"
+    user_id: str
+    expires_at: str
+
+
 class CGTReading(BaseModel):
     timestamp: str = Field(description="ISO timestamp of the glucose reading.")
     glucose_mg_dl: float = Field(ge=40, le=450, description="Interstitially measured glucose in mg/dL.")

@@ -618,3 +618,87 @@ def test_an_out_of_range_reading_is_rejected(client):
         headers={"X-Pathyam-User": "a0000000-0000-0000-0000-0000000000a6"},
     )
     assert response.status_code == 422
+
+
+# ------------------------------------------------------------------ auth ----
+
+def test_register_login_and_scoped_data(client):
+    """The whole point: a session token, not a self-asserted header."""
+    creds = {"email": "auth-test-1@example.com", "password": "a-long-enough-password"}
+
+    registered = client.post("/v1/auth/register", json=creds)
+    assert registered.status_code == 201, registered.text
+    token = registered.json()["access_token"]
+    user_id = registered.json()["user_id"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    assert client.get("/v1/auth/me", headers=auth).json()["user_id"] == user_id
+
+    client.post("/v1/log", json={"text": "2 idli", "n_samples": 120}, headers=auth)
+    assert client.get("/v1/history", headers=auth).json()["count"] >= 1
+
+    # A second account sees none of it.
+    other = client.post("/v1/auth/register", json={
+        "email": "auth-test-2@example.com", "password": "another-long-password"}).json()
+    other_auth = {"Authorization": f"Bearer {other['access_token']}"}
+    assert client.get("/v1/history", headers=other_auth).json()["count"] == 0
+
+
+def test_a_wrong_password_is_rejected_without_saying_which_field_was_wrong(client):
+    client.post("/v1/auth/register", json={
+        "email": "auth-test-3@example.com", "password": "the-real-password"})
+
+    wrong_password = client.post("/v1/auth/login", json={
+        "email": "auth-test-3@example.com", "password": "not-the-password"})
+    unknown_email = client.post("/v1/auth/login", json={
+        "email": "nobody-here@example.com", "password": "not-the-password"})
+
+    assert wrong_password.status_code == 401
+    assert unknown_email.status_code == 401
+    # Identical message: login must not reveal which addresses are registered.
+    assert wrong_password.json()["detail"] == unknown_email.json()["detail"]
+
+
+def test_a_bad_or_revoked_token_is_refused(client):
+    creds = {"email": "auth-test-4@example.com", "password": "yet-another-password"}
+    token = client.post("/v1/auth/register", json=creds).json()["access_token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    assert client.get("/v1/auth/me", headers=auth).status_code == 200
+    assert client.post("/v1/auth/logout", headers=auth).json()["sessions_revoked"] == 1
+    assert client.get("/v1/auth/me", headers=auth).status_code == 401
+
+    assert client.get(
+        "/v1/auth/me", headers={"Authorization": "Bearer not-a-real-token"}
+    ).status_code == 401
+
+
+def test_logout_everywhere_revokes_every_session(client):
+    """Why sessions are opaque rows and not JWTs: this has to actually work."""
+    creds = {"email": "auth-test-5@example.com", "password": "a-fifth-long-password"}
+    client.post("/v1/auth/register", json=creds)
+
+    first = client.post("/v1/auth/login", json=creds).json()["access_token"]
+    second = client.post("/v1/auth/login", json=creds).json()["access_token"]
+
+    revoked = client.post(
+        "/v1/auth/logout?everywhere=true",
+        headers={"Authorization": f"Bearer {second}"},
+    ).json()["sessions_revoked"]
+    assert revoked >= 2
+
+    for token in (first, second):
+        assert client.get(
+            "/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        ).status_code == 401
+
+
+def test_the_unverified_dev_header_is_refused_in_production(client, monkeypatch):
+    """A self-asserted identity header alongside real auth is a way in."""
+    monkeypatch.setenv("PATHYAM_ENV", "production")
+    response = client.get(
+        "/v1/history",
+        headers={"X-Pathyam-User": "00000000-0000-0000-0000-000000000009"},
+    )
+    assert response.status_code == 401
+    assert "authentication required" in response.json()["detail"]

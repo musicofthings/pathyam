@@ -34,7 +34,10 @@ from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
 
 from . import schemas as s
-from .journal import GlucoseRepository, JournalRepository, resolve_user_id
+from .auth import (AccountLocked, AuthRepository, InvalidCredentials,
+                    SessionExpired)
+from .journal import (GlucoseRepository, JournalRepository, dev_identity_allowed,
+                      resolve_user_id)
 
 _POOL: Any = None
 
@@ -113,6 +116,7 @@ class _Services:
         self.resolver = DishResolver(self.source)
         self.journal = JournalRepository(conn)
         self.glucose = GlucoseRepository(conn)
+        self.auth = AuthRepository(conn)
 
 
 def get_services():
@@ -202,6 +206,105 @@ def _scaled_priors(svc: _Services, template_ref: str, scales: dict[str, float]) 
                               unit=spec.unit, dtype=spec.dtype)
         out[name] = base.scaled(factor)
     return out
+
+
+def current_user(
+    svc: _Services = Depends(get_services),
+    authorization: str | None = Header(default=None),
+    x_pathyam_user: str | None = Header(default=None),
+) -> str:
+    """The user this request acts for.
+
+    A Bearer token is the real answer. The unverified X-Pathyam-User header is only
+    consulted when no token is present AND dev identity is enabled, which it is not
+    in production -- see journal.dev_identity_allowed.
+    """
+    if authorization and authorization.lower().startswith("bearer "):
+        try:
+            return svc.auth.resolve_session(authorization.split(None, 1)[1].strip())
+        except SessionExpired as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    if dev_identity_allowed():
+        return resolve_user_id(x_pathyam_user)
+
+    raise HTTPException(
+        status_code=401,
+        detail="authentication required: send an Authorization: Bearer <token> header",
+    )
+
+
+# --------------------------------------------------------------------- auth ----
+
+
+@app.post("/v1/auth/register", response_model=s.AuthSession, tags=["auth"], status_code=201)
+def register(req: s.RegisterRequest, svc: _Services = Depends(get_services)) -> s.AuthSession:
+    """Create an account and sign in.
+
+    Credentials are stored in app.user_credential, deliberately separate from the
+    pseudonymous app.app_user so analytics roles never see contact data.
+    """
+    try:
+        svc.auth.register(req.email, req.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    session = svc.auth.login(req.email, req.password)
+    # Storing meal logs is what the service does; consent for it is recorded at
+    # sign-up. Optional purposes (cgm_telemetry) are granted separately.
+    svc.auth.grant_consent(session.user_id, "account")
+    svc.auth.grant_consent(session.user_id, "core_service")
+    return s.AuthSession(access_token=session.token, user_id=session.user_id,
+                         expires_at=session.expires_at.isoformat())
+
+
+@app.post("/v1/auth/login", response_model=s.AuthSession, tags=["auth"])
+def login(req: s.LoginRequest, svc: _Services = Depends(get_services)) -> s.AuthSession:
+    """Sign in. The response is the only time the token is shown."""
+    try:
+        session = svc.auth.login(req.email, req.password)
+    except AccountLocked as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except InvalidCredentials as exc:
+        # Deliberately does not distinguish unknown address from wrong password.
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    return s.AuthSession(access_token=session.token, user_id=session.user_id,
+                         expires_at=session.expires_at.isoformat())
+
+
+@app.post("/v1/auth/logout", tags=["auth"])
+def logout(
+    svc: _Services = Depends(get_services),
+    authorization: str | None = Header(default=None),
+    everywhere: bool = False,
+) -> dict[str, Any]:
+    """End this session, or every session for the user."""
+    if not (authorization or "").lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="no bearer token")
+    token = authorization.split(None, 1)[1].strip()
+
+    if everywhere:
+        user_id = svc.auth.resolve_session(token)
+        return {"status": "ok", "sessions_revoked": svc.auth.logout_everywhere(user_id)}
+    return {"status": "ok", "sessions_revoked": int(svc.auth.logout(token))}
+
+
+@app.get("/v1/auth/me", tags=["auth"])
+def whoami(user_id: str = Depends(current_user)) -> dict[str, Any]:
+    return {"user_id": user_id}
+
+
+@app.post("/v1/auth/consent/{purpose_key}", tags=["auth"])
+def grant_consent(
+    purpose_key: str,
+    svc: _Services = Depends(get_services),
+    user_id: str = Depends(current_user),
+) -> dict[str, Any]:
+    """Record consent for an optional processing purpose."""
+    svc.auth.grant_consent(user_id, purpose_key)
+    return {"status": "ok", "purpose": purpose_key,
+            "granted": svc.auth.has_consent(user_id, purpose_key)}
 
 
 # ----------------------------------------------------------------- handlers ----
@@ -409,7 +512,7 @@ def _infer_meal_type(dt: datetime.datetime | None = None) -> s.MealType:
 def log(
     req: s.LogRequest,
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> s.LogResponse:
     """Resolve and compute in one call — the primary app path.
 
@@ -525,7 +628,7 @@ def log(
     # Persist. Previously this appended to a module-level list, so history was lost
     # on restart and shared between every caller.
     svc.journal.insert_entry(
-        user_id=resolve_user_id(x_pathyam_user),
+        user_id=user_id,
         entry_id=entry_id,
         consumed_at=consumed_at_str,
         meal_type=meal_type,
@@ -544,12 +647,11 @@ def log(
 def get_history(
     date: str | None = None,
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> s.HistoryResponse:
     """Logged meals for a date (YYYY-MM-DD), or every entry when no date is given."""
     import datetime
 
-    user_id = resolve_user_id(x_pathyam_user)
     target_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
 
     entries = svc.journal.list_entries(user_id, target_date)
@@ -575,10 +677,10 @@ def get_history(
 def delete_history_entry(
     entry_id: str,
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> dict[str, str]:
     """Soft-delete a logged meal. The row is retained with deleted_at stamped."""
-    if not svc.journal.soft_delete(resolve_user_id(x_pathyam_user), entry_id):
+    if not svc.journal.soft_delete(user_id, entry_id):
         raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
     return {"status": "ok", "deleted_id": entry_id}
 
@@ -588,10 +690,9 @@ def update_entry_portion(
     entry_id: str,
     req: s.UpdatePortionRequest,
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> s.JournalEntry:
     """Shift how much of this meal was eaten. Nutrients scale with servings."""
-    user_id = resolve_user_id(x_pathyam_user)
     if not svc.journal.adjust_portions(user_id, entry_id, req.delta):
         raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
 
@@ -604,13 +705,13 @@ def update_entry_portion(
 @app.get("/v1/dashboard/summary", response_model=s.DailyDashboardSummary, tags=["dashboard"])
 def get_dashboard_summary(
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> s.DailyDashboardSummary:
     """Today's totals against the daily energy target."""
     import datetime
 
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    entries = svc.journal.list_entries(resolve_user_id(x_pathyam_user), today_str)
+    entries = svc.journal.list_entries(user_id, today_str)
 
     tot_kcal = sum(e.total_kcal for e in entries)
     # 2000 kcal is a generic adult default, not a personalised target. Personalising
@@ -766,7 +867,7 @@ def get_nutrition_rss_news() -> s.RSSFeedResponse:
 def receive_cgt_telemetry(
     req: s.CGTTelemetryRequest,
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> s.CGTTelemetryResponse:
     """Store continuous glucose readings.
 
@@ -784,7 +885,6 @@ def receive_cgt_telemetry(
     yet enforced here — there is no authentication, so there is no authenticated
     subject whose consent could be checked.
     """
-    user_id = resolve_user_id(x_pathyam_user or req.user_id)
     accepted, duplicates = svc.glucose.ingest(user_id, req.readings)
 
     return s.CGTTelemetryResponse(
@@ -799,7 +899,7 @@ def receive_cgt_telemetry(
 def get_postprandial_readings(
     meal_log_id: str,
     svc: _Services = Depends(get_services),
-    x_pathyam_user: str | None = Header(default=None),
+    user_id: str = Depends(current_user),
 ) -> dict[str, Any]:
     """Measured glucose in the 3h after one logged meal.
 
@@ -808,7 +908,6 @@ def get_postprandial_readings(
     and has never been compared to these readings. Having both in one place is the
     prerequisite for changing that.
     """
-    user_id = resolve_user_id(x_pathyam_user)
     readings = svc.glucose.postprandial_readings(user_id, meal_log_id)
     return {
         "meal_log_id": meal_log_id,
