@@ -33,7 +33,7 @@ you can authorise or supply.
 
 ## 🟢 Engineering left — I could do these
 
-_(Consent enforcement, formerly item 9, is done — see `d0a...` below.)_
+_(Consent enforcement, formerly item 9, landed in `2bd09a4`.)_
 
 | # | What | Notes |
 |---|---|---|
@@ -103,7 +103,7 @@ Worth knowing, because they shaped advice I gave you:
 ```bash
 git pull origin phase1/restore-trust
 cd engine && ./dev.sh --reset --no-serve      # fetches IFCT (~1.1 MB, gitignored)
-./run_tests.sh                                 # 349 passing
+./run_tests.sh                                 # 353 passing
 
 export PATHYAM_DSN="$(cat .devdata/dsn)"
 PYTHONPATH=. python3 -m pathyam_engine.authoring --dir ../db/templates audit   # 17/17, 100%
