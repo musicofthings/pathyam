@@ -354,8 +354,12 @@ class CGTTelemetryRequest(BaseModel):
 
 class CGTTelemetryResponse(BaseModel):
     status: Literal["ok", "error"] = "ok"
-    count: int
-    readings: list[CGTReading]
+    # What was actually stored, rather than the submitted batch echoed back. The
+    # previous version returned the readings it was given, which looked identical
+    # whether or not anything had been persisted.
+    accepted: int
+    duplicates: int
+    total_stored: int = Field(description="Readings held for this user, after ingest.")
 
 
 class GlycemicResponseRequest(BaseModel):

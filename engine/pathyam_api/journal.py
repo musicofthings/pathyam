@@ -26,7 +26,7 @@ from typing import Any
 
 from . import schemas as s
 
-__all__ = ["DEV_USER_ID", "resolve_user_id", "JournalRepository"]
+__all__ = ["DEV_USER_ID", "resolve_user_id", "JournalRepository", "GlucoseRepository"]
 
 # Matches the row seeded by db/013_meal_log_app_fields.sql.
 DEV_USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -285,6 +285,79 @@ class JournalRepository:
 # meals -- another reason the journal's peak figure is illustrative only.
 _ASSUMED_GI = 68.0
 _ASSUMED_BASELINE_MG_DL = 95.0
+
+
+class GlucoseRepository:
+    """Reads and writes continuous glucose readings (db/014)."""
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    def ingest(self, user_id: str, readings: list[Any]) -> tuple[int, int]:
+        """Store a batch. Returns (accepted, duplicates_updated).
+
+        Idempotent on (user_id, reading_at): sensors resend on reconnect and clients
+        retry, and a doubled reading would bias anything fitted from this table.
+        """
+        if not readings:
+            return (0, 0)
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO app.app_user (user_id, preferred_lang, is_anonymised)
+                   VALUES (%s, 'en', true) ON CONFLICT (user_id) DO NOTHING""",
+                (user_id,),
+            )
+
+            accepted = duplicates = 0
+            for reading in readings:
+                cur.execute(
+                    """INSERT INTO app.cgm_reading
+                           (user_id, reading_at, glucose_mg_dl, trend_arrow)
+                       VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (user_id, reading_at) DO UPDATE
+                           SET glucose_mg_dl = EXCLUDED.glucose_mg_dl,
+                               trend_arrow = EXCLUDED.trend_arrow,
+                               ingested_at = now()
+                       RETURNING (xmax = 0) AS inserted""",
+                    (user_id, reading.timestamp, reading.glucose_mg_dl,
+                     reading.trend_arrow),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    accepted += 1
+                else:
+                    duplicates += 1
+
+        self._conn.commit()
+        return (accepted, duplicates)
+
+    def count_for_user(self, user_id: str) -> int:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM app.cgm_reading WHERE user_id = %s", (user_id,)
+            )
+            return int(cur.fetchone()[0])
+
+    def postprandial_readings(self, user_id: str, meal_log_id: str) -> list[dict[str, Any]]:
+        """Readings in the 3h after one meal, as minutes since it.
+
+        This is the shape a fitted CGT model would be scored against. Nothing
+        currently fits against it -- the shipped curve is illustrative.
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """SELECT minutes_since_meal, glucose_mg_dl
+                     FROM app.v_postprandial_reading
+                    WHERE user_id = %s AND meal_log_id = %s
+                    ORDER BY reading_at""",
+                (user_id, meal_log_id),
+            )
+            return [
+                {"minutes_since_meal": round(float(m), 1),
+                 "glucose_mg_dl": float(g)}
+                for m, g in cur.fetchall()
+            ]
 
 
 def _illustrative_peak(carbs_g: float, fat_g: float, fibre_g: float) -> float:

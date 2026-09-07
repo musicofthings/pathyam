@@ -265,11 +265,14 @@ def test_log_unknown_query_graceful_fallback(client):
 
 def test_cgt_telemetry_and_predict_spike(client):
     t_resp = client.post("/v1/cgt/telemetry", json={
-        "user_id": "test-user-1",
+        "user_id": "b0000000-0000-0000-0000-0000000000b1",
         "readings": [{"timestamp": "2026-08-14T08:30:00Z", "glucose_mg_dl": 98.5, "trend_arrow": "flat"}]
     })
     assert t_resp.status_code == 200
-    assert t_resp.json()["count"] == 1
+    # "count" was the echoed batch size and said nothing about persistence; the
+    # response now reports what was actually stored.
+    assert t_resp.json()["accepted"] == 1
+    assert t_resp.json()["total_stored"] >= 1
 
     p_resp = client.post("/v1/cgt/predict_spike", json={
         "carbs_g": 50.0,
@@ -283,6 +286,9 @@ def test_cgt_telemetry_and_predict_spike(client):
     assert cgt["peak_mg_dl"] > 95.0
     assert cgt["glycemic_load"] == 35.0
     assert len(cgt["curve"]) > 10
+    # The curve must never be presented without the caveat that it is illustrative.
+    assert cgt["is_validated"] is False
+    assert cgt["disclaimer"]
 
 
 
@@ -499,3 +505,116 @@ def test_the_journal_reads_back_exactly_what_the_engine_computed(client):
         if e["id"] == posted["id"]
     )
     assert entry["total_kcal"] == pytest.approx(engine_total, abs=0.5)
+
+
+# --------------------------------------------------------- CGM telemetry ----
+#
+# /v1/cgt/telemetry used to echo its input and store nothing, so no glucose data
+# existed anywhere. These pin that it persists, that replays do not double-count,
+# and that readings can be paired back to the meal that preceded them.
+
+
+def _readings(start="2026-03-01T08:00:00+00:00", n=3, first=95.0):
+    import datetime
+
+    base = datetime.datetime.fromisoformat(start)
+    return [
+        {
+            "timestamp": (base + datetime.timedelta(minutes=15 * i)).isoformat(),
+            "glucose_mg_dl": first + 10.0 * i,
+            "trend_arrow": "rising",
+        }
+        for i in range(n)
+    ]
+
+
+def test_glucose_readings_are_stored_not_echoed(client):
+    user = "a0000000-0000-0000-0000-0000000000a1"
+    body = client.post(
+        "/v1/cgt/telemetry", json={"readings": _readings()},
+        headers={"X-Pathyam-User": user},
+    ).json()
+
+    assert body["accepted"] == 3
+    assert body["duplicates"] == 0
+    assert body["total_stored"] == 3
+
+
+def test_a_replayed_batch_updates_rather_than_duplicating(client):
+    """Sensors resend on reconnect; a doubled reading would bias any fitted model."""
+    user = "a0000000-0000-0000-0000-0000000000a2"
+    payload = {"readings": _readings(start="2026-03-02T08:00:00+00:00")}
+
+    first = client.post("/v1/cgt/telemetry", json=payload,
+                        headers={"X-Pathyam-User": user}).json()
+    replay = client.post("/v1/cgt/telemetry", json=payload,
+                         headers={"X-Pathyam-User": user}).json()
+
+    assert first["accepted"] == 3
+    assert replay["accepted"] == 0
+    assert replay["duplicates"] == 3
+    assert replay["total_stored"] == 3, "a replay must not grow the trace"
+
+
+def test_one_users_readings_are_invisible_to_another(client):
+    alice = "a0000000-0000-0000-0000-0000000000a3"
+    bob = "a0000000-0000-0000-0000-0000000000a4"
+
+    client.post("/v1/cgt/telemetry",
+                json={"readings": _readings(start="2026-03-03T08:00:00+00:00")},
+                headers={"X-Pathyam-User": alice})
+    bob_body = client.post(
+        "/v1/cgt/telemetry",
+        json={"readings": _readings(start="2026-03-03T08:00:00+00:00")},
+        headers={"X-Pathyam-User": bob},
+    ).json()
+
+    # Same timestamps, different user: these are separate traces, not duplicates.
+    assert bob_body["accepted"] == 3
+    assert bob_body["total_stored"] == 3
+
+
+def test_readings_pair_back_to_the_meal_that_preceded_them(client):
+    """The join a fitted CGT model would be trained against."""
+    import datetime
+
+    user = "a0000000-0000-0000-0000-0000000000a5"
+    logged = client.post(
+        "/v1/log", json={"text": "2 idli", "n_samples": 120},
+        headers={"X-Pathyam-User": user},
+    ).json()
+    meal_id = logged["id"]
+
+    consumed = datetime.datetime.fromisoformat(
+        next(e for e in client.get("/v1/history", headers={"X-Pathyam-User": user})
+             .json()["entries"] if e["id"] == meal_id)["consumed_at"]
+    )
+    # Inside the 3h window, and one well outside it.
+    inside = [
+        {"timestamp": (consumed + datetime.timedelta(minutes=m)).isoformat(),
+         "glucose_mg_dl": 95.0 + m, "trend_arrow": "rising"}
+        for m in (15, 45, 90)
+    ]
+    outside = [{"timestamp": (consumed + datetime.timedelta(hours=5)).isoformat(),
+                "glucose_mg_dl": 99.0, "trend_arrow": "flat"}]
+    client.post("/v1/cgt/telemetry", json={"readings": inside + outside},
+                headers={"X-Pathyam-User": user})
+
+    paired = client.get(f"/v1/cgt/postprandial/{meal_id}",
+                        headers={"X-Pathyam-User": user}).json()
+
+    assert paired["count"] == 3, "only readings inside the 3h window belong to the meal"
+    minutes = [r["minutes_since_meal"] for r in paired["readings"]]
+    assert minutes == sorted(minutes)
+    assert all(0 <= m < 180 for m in minutes)
+
+
+def test_an_out_of_range_reading_is_rejected(client):
+    """Outside 40-450 mg/dL is a sensor error, not a measurement."""
+    response = client.post(
+        "/v1/cgt/telemetry",
+        json={"readings": [{"timestamp": "2026-03-04T08:00:00+00:00",
+                            "glucose_mg_dl": 900.0}]},
+        headers={"X-Pathyam-User": "a0000000-0000-0000-0000-0000000000a6"},
+    )
+    assert response.status_code == 422

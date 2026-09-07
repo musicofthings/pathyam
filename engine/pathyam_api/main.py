@@ -33,7 +33,7 @@ from pathyam_engine.vision import (GeminiVisionProvider, VisionError,
 from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 
 from . import schemas as s
-from .journal import JournalRepository, resolve_user_id
+from .journal import GlucoseRepository, JournalRepository, resolve_user_id
 
 _POOL: Any = None
 
@@ -111,6 +111,7 @@ class _Services:
         self.source = PostgresCandidateSource(conn)
         self.resolver = DishResolver(self.source)
         self.journal = JournalRepository(conn)
+        self.glucose = GlucoseRepository(conn)
 
 
 def get_services():
@@ -753,13 +754,59 @@ def get_nutrition_rss_news() -> s.RSSFeedResponse:
 
 
 @app.post("/v1/cgt/telemetry", response_model=s.CGTTelemetryResponse, tags=["cgt"])
-def receive_cgt_telemetry(req: s.CGTTelemetryRequest) -> s.CGTTelemetryResponse:
-    """Ingest interstitial continuous glucose monitoring (CGT/CGM) patch readings."""
+def receive_cgt_telemetry(
+    req: s.CGTTelemetryRequest,
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> s.CGTTelemetryResponse:
+    """Store continuous glucose readings.
+
+    This previously echoed its input and stored nothing, so no glucose data existed
+    anywhere in the system -- which is also why the CGT curve is still illustrative:
+    its coefficients cannot be fitted against readings that were never kept.
+
+    Ingest is idempotent on (user, reading time). Sensors resend on reconnect and
+    clients retry, and a duplicated reading would quietly bias anything fitted from
+    this table, so a replayed batch updates in place and is reported as a duplicate
+    rather than accepted twice.
+
+    Readings are health data. They are stored against the pseudonymous user id and
+    nothing else. Consent purpose `cgm_telemetry` is registered in db/014 but is NOT
+    yet enforced here — there is no authentication, so there is no authenticated
+    subject whose consent could be checked.
+    """
+    user_id = resolve_user_id(x_pathyam_user or req.user_id)
+    accepted, duplicates = svc.glucose.ingest(user_id, req.readings)
+
     return s.CGTTelemetryResponse(
         status="ok",
-        count=len(req.readings),
-        readings=req.readings,
+        accepted=accepted,
+        duplicates=duplicates,
+        total_stored=svc.glucose.count_for_user(user_id),
     )
+
+
+@app.get("/v1/cgt/postprandial/{meal_log_id}", tags=["cgt"])
+def get_postprandial_readings(
+    meal_log_id: str,
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Measured glucose in the 3h after one logged meal.
+
+    This is what a fitted CGT model would be trained and scored against. Nothing
+    fits against it yet: the curve `/v1/cgt/predict_spike` returns is illustrative
+    and has never been compared to these readings. Having both in one place is the
+    prerequisite for changing that.
+    """
+    user_id = resolve_user_id(x_pathyam_user)
+    readings = svc.glucose.postprandial_readings(user_id, meal_log_id)
+    return {
+        "meal_log_id": meal_log_id,
+        "count": len(readings),
+        "readings": readings,
+        "note": "measured readings; the predicted curve is illustrative and unfitted",
+    }
 
 
 @app.post("/v1/cgt/predict_spike", response_model=s.GlycemicResponsePrediction,

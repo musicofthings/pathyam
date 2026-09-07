@@ -27,6 +27,7 @@ The compute core is real and tested. Several surrounding features are scaffoldin
 | **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
 | **Web UI** | Single-page app, 6 tabs, served same-origin from `pathyam_api/static/`. Relative API paths throughout. |
 | **Vision fails honestly** | No default model id, no silent mock fallback. Missing key or model → 501; upstream failure → 502. The offline mock is reachable only via `PATHYAM_MOCK_VISION` and is stamped `model_version="mock"`. |
+| **CGM telemetry** | Readings persist to `app.cgm_reading`, idempotent on (user, reading time) so sensor resends do not double-count. `app.v_postprandial_reading` pairs each meal with the glucose that followed it. |
 | **Citation verification** | Checks that an identifier resolves to the work being cited — title, authors, year — not merely that it exists. Three-valued: VERIFIED / UNVERIFIED (registry unreachable) / CONTRADICTED (resolves to a different work). Verified live against the fabricated citation that shipped. `evidence/citation_validator.py` |
 
 ### Known gaps
@@ -42,7 +43,8 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 | **Evidence retrieval is a keyword matcher** | One arm: term overlap over a 3-document in-memory corpus. No BM25, no Postgres FTS, no pgvector — the module now says so rather than claiming otherwise. Making it real needs the corpus in Postgres and an embedding provider this repo has no credentials for. | Phase 5 |
 | **Evidence corpus is 3 documents** | Enough to exercise the pipeline, not enough to answer clinical questions. | Phase 5 |
 | **CGT curve is illustrative, not predictive** | Relabelled rather than sourced: the coefficients could not be cited because they are not published values. Glycemic load is standard; the fat and fibre adjustments are directionally supported but their magnitudes are tuning. Every response carries `is_validated: false` and a disclaimer, and the UI renders it. Making it real needs paired CGM traces and weighed meal records. | Phase 6 |
-| **`/v1/cgt/telemetry`** | Echoes its input. Stores nothing, used by nothing. Until it persists, there is no CGM data to fit the curve against. | Phase 6 |
+| **CGT model is unfitted** | Glucose readings are now stored and pair back to meals via `/v1/cgt/postprandial/{meal_log_id}`, so the data needed to fit the curve can be collected. Nothing fits against it yet — the predicted curve and the measured trace sit side by side, uncompared. | Phase 6 |
+| **Consent is recorded, not enforced** | `cgm_telemetry` is registered as a consent purpose in `db/014`, but the API does not check it: with no authentication there is no authenticated subject whose consent could be checked. | Phase 6 |
 | **Safety benchmarks** | The suite computes correctly, but **no golden meal dataset exists** — the only samples are two synthetic rows in a unit test. It has nothing to measure. | Phase 4 |
 | **Mobile app** | `apps/mobile` has never been installed or built and has no lockfile. Expo 51 / React Native 0.74. | Phase 6 |
 
