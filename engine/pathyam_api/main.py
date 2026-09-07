@@ -38,6 +38,7 @@ from .auth import (AccountLocked, AuthRepository, InvalidCredentials,
                     SessionExpired)
 from .journal import (GlucoseRepository, JournalRepository, dev_identity_allowed,
                       resolve_user_id)
+from .ratelimit import AUTH_LIMIT, RateLimiter, RateLimitExceeded, client_address
 
 _POOL: Any = None
 
@@ -234,6 +235,33 @@ def current_user(
     )
 
 
+# Process-local, which is exactly its limitation — see ratelimit.py. It makes online
+# password guessing from one source expensive; it is not the edge limit.
+_auth_limiter = RateLimiter(AUTH_LIMIT)
+
+
+def enforce_auth_rate_limit(request: Request) -> None:
+    """Throttle credential endpoints by client address.
+
+    Applied to login and registration only. The per-account lockout does not cover
+    password spraying — one attempt against each of many accounts never trips a
+    per-account counter — and registration is otherwise an unbounded way to create
+    rows.
+    """
+    address = client_address(
+        peer=request.client.host if request.client else None,
+        forwarded_for=request.headers.get("x-forwarded-for"),
+    )
+    try:
+        _auth_limiter.check(address)
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="too many attempts from this address; slow down",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+
 def require_consent(svc: _Services, user_id: str, purpose_key: str) -> None:
     """Refuse a write when the user has not consented to its purpose.
 
@@ -262,7 +290,11 @@ def require_consent(svc: _Services, user_id: str, purpose_key: str) -> None:
 
 
 @app.post("/v1/auth/register", response_model=s.AuthSession, tags=["auth"], status_code=201)
-def register(req: s.RegisterRequest, svc: _Services = Depends(get_services)) -> s.AuthSession:
+def register(
+    req: s.RegisterRequest,
+    svc: _Services = Depends(get_services),
+    _: None = Depends(enforce_auth_rate_limit),
+) -> s.AuthSession:
     """Create an account and sign in.
 
     Credentials are stored in app.user_credential, deliberately separate from the
@@ -283,7 +315,11 @@ def register(req: s.RegisterRequest, svc: _Services = Depends(get_services)) -> 
 
 
 @app.post("/v1/auth/login", response_model=s.AuthSession, tags=["auth"])
-def login(req: s.LoginRequest, svc: _Services = Depends(get_services)) -> s.AuthSession:
+def login(
+    req: s.LoginRequest,
+    svc: _Services = Depends(get_services),
+    _: None = Depends(enforce_auth_rate_limit),
+) -> s.AuthSession:
     """Sign in. The response is the only time the token is shown."""
     try:
         session = svc.auth.login(req.email, req.password)

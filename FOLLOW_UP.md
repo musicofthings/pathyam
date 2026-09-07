@@ -1,6 +1,6 @@
 # Pathyam — what was done, and what needs you
 
-_Written 2026-09-08. Branch `phase1/restore-trust`, all pushed, suite green at 353._
+_Written 2026-09-08. Branch `phase1/restore-trust`, all pushed, suite green at 364._
 
 This session started as a repo review and turned into six phases of work. The short
 version: the codebase contained a lot of confident-looking fabrication, that is gone,
@@ -33,12 +33,12 @@ you can authorise or supply.
 
 ## 🟢 Engineering left — I could do these
 
-_(Consent enforcement, formerly item 9, landed in `2bd09a4`.)_
+_(Consent enforcement (9) landed in `2bd09a4`. Per-IP rate limiting (11) is done —
+in-process only, so the edge limit is still worth having; see README.)_
 
 | # | What | Notes |
 |---|---|---|
 | 10 | Password reset + email verification | Needs somewhere to send mail. An account whose password is forgotten is currently unrecoverable. |
-| 11 | Per-IP rate limiting | Only per-account lockout exists (8 attempts). Belongs at the edge, not in the app. |
 | 12 | Semantic retrieval (pgvector) | Needs an embedding provider. `reciprocal_rank_fusion` is correct and unused until a second arm exists. I would not add a stub returning lexical results under a semantic name — that is what I removed. |
 | 13 | Romanised resolution: last ~2 queries | 63.3% against a **70.0% ceiling** (see below). `dosai` and `dose` still lose to qualified dosa siblings. |
 | 14 | Mobile app | `apps/mobile` has never been installed or built, no lockfile, Expo 51 / RN 0.74 (~2 years old). |
@@ -103,7 +103,7 @@ Worth knowing, because they shaped advice I gave you:
 ```bash
 git pull origin phase1/restore-trust
 cd engine && ./dev.sh --reset --no-serve      # fetches IFCT (~1.1 MB, gitignored)
-./run_tests.sh                                 # 353 passing
+./run_tests.sh                                 # 364 passing
 
 export PATHYAM_DSN="$(cat .devdata/dsn)"
 PYTHONPATH=. python3 -m pathyam_engine.authoring --dir ../db/templates audit   # 17/17, 100%

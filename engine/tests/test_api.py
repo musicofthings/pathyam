@@ -790,3 +790,60 @@ def test_granting_the_same_consent_twice_is_not_an_error(client):
                                headers={"X-Pathyam-User": user})
         assert response.status_code == 200
         assert response.json()["granted"] is True
+
+
+# --------------------------------------------------------- auth rate limit ----
+
+def test_repeated_login_attempts_from_one_address_are_throttled(client):
+    """Per-account lockout does not cover password spraying: one attempt against
+    each of many accounts never trips a per-account counter."""
+    from pathyam_api.main import _auth_limiter
+    from pathyam_api.ratelimit import AUTH_LIMIT
+
+    _auth_limiter.reset()
+    try:
+        statuses = [
+            client.post("/v1/auth/login", json={
+                "email": f"spray-{i}@example.com", "password": "wrong-password-here",
+            }).status_code
+            for i in range(AUTH_LIMIT.requests + 3)
+        ]
+    finally:
+        _auth_limiter.reset()
+
+    assert statuses[0] == 401, "the first attempts fail on credentials, not the limit"
+    assert 429 in statuses, "sustained attempts from one address must be throttled"
+    # Every account tried was different, so nothing here trips the per-account lockout.
+    assert statuses.index(429) >= AUTH_LIMIT.requests
+
+
+def test_a_throttled_response_says_when_to_retry(client):
+    from pathyam_api.main import _auth_limiter
+    from pathyam_api.ratelimit import AUTH_LIMIT
+
+    _auth_limiter.reset()
+    try:
+        response = None
+        for _ in range(AUTH_LIMIT.requests + 2):
+            response = client.post("/v1/auth/login", json={
+                "email": "retry-after@example.com", "password": "wrong-password-here"})
+        assert response.status_code == 429
+        assert int(response.headers["Retry-After"]) > 0
+    finally:
+        _auth_limiter.reset()
+
+
+def test_the_rate_limit_does_not_block_ordinary_api_use(client):
+    """It is on the credential endpoints only; logging meals is not throttled here."""
+    from pathyam_api.main import _auth_limiter
+    from pathyam_api.ratelimit import AUTH_LIMIT
+
+    _auth_limiter.reset()
+    user = "e0000000-0000-0000-0000-0000000000e1"
+    _consent(client, user, "core_service")
+    try:
+        for _ in range(AUTH_LIMIT.requests + 5):
+            response = client.get("/v1/history", headers={"X-Pathyam-User": user})
+            assert response.status_code == 200
+    finally:
+        _auth_limiter.reset()
