@@ -18,14 +18,48 @@ from typing import Any, Iterable, Sequence
 from .trigram import normalize, phonetic_similarity, similarity, word_similarity
 
 # Containment must never beat a full match: word_similarity("dosa", "masala dosa")
-# is 1.0, which would tie plain dosa with masala dosa. A small discount keeps the
-# ordering right without suppressing genuine partial matches.
-_WORD_MATCH_DISCOUNT = 0.94
+# is 1.0, which would tie plain dosa with masala dosa.
+#
+# A single flat discount treats every partial match alike. The discount instead
+# scales with COVERAGE -- the share of the candidate's own words the query accounts
+# for. A query naming every word keeps full credit ("masala dosa" vs "Dosa, masala",
+# coverage 1.0); one naming half of it is pulled toward the floor ("dosai" vs
+# "ravai dosai", coverage 0.5). The user said one word; a candidate carrying a
+# qualifier they never mentioned should cost something proportional to what went
+# unsaid.
+#
+# 0.80 was chosen by sweeping the floor against the leave-one-out evaluation and is
+# not arbitrary. It is the only value that takes the full accuracy gain without
+# costing something elsewhere:
+#
+#   floor  top-1   top-5    MRR   romanised  ask-recall
+#    1.00  85.5%   92.0%   0.881     56.7%      100%     (coverage disabled)
+#    0.90  87.0%   92.0%   0.889     56.7%      100%
+#    0.80  88.4%   92.0%   0.899     63.3%      100%     <- chosen
+#    0.70  88.4%   91.3%   0.897     63.3%      100%     top-5 starts to fall
+#    0.60  88.4%   91.3%   0.897     63.3%       91%     abstention breaks
+#
+# Below 0.60 the resolver stops flagging cases the golden set marks "should ask",
+# which test_abstention_catches_every_case_marked_should_ask guards. An earlier
+# attempt at this change used 0.55, broke that test, and was reverted -- the floor
+# is load-bearing, so re-tune it against the sweep rather than by eye.
+_WORD_MATCH_FLOOR = 0.80
+# Overall multiplier on the containment signal. 1.0 in normal operation; the ablation
+# harness sets it to 0.0 to switch containment off and measure its contribution.
+_WORD_MATCH_DISCOUNT = 1.0
 # Phonetic matches are real but coarser than a direct trigram hit, so they rank below.
 _PHONETIC_DISCOUNT = 0.90
 
 __all__ = ["RawCandidate", "LexiconEntry", "CandidateSource",
            "InMemoryCandidateSource", "PostgresCandidateSource"]
+
+
+def _coverage(target: str, surface: str) -> float:
+    """Share of ``surface``'s words the query can account for. 1.0 when it names all."""
+    surface_words = len(surface.split())
+    if surface_words <= 0:
+        return 1.0
+    return min(len(target.split()), surface_words) / surface_words
 
 
 @dataclass(frozen=True)
@@ -81,8 +115,12 @@ def _score_entries(
         #   direct trigram   - "dosai" vs "dosa"
         #   word containment - "dosa" inside "dosa masala"  (discounted)
         #   phonetic         - "thosai" vs "dosa"           (discounted further)
+        coverage = _coverage(target, surface_norm)
+        containment = _WORD_MATCH_FLOOR + (1.0 - _WORD_MATCH_FLOOR) * coverage
+
         direct = similarity(target, surface_norm)
-        contained = word_similarity(target, surface_norm) * _WORD_MATCH_DISCOUNT
+        contained = (word_similarity(target, surface_norm)
+                     * containment * _WORD_MATCH_DISCOUNT)
         phonetic = phonetic_similarity(target, surface_norm) * _PHONETIC_DISCOUNT
 
         score = max(direct, contained)

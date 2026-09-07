@@ -352,3 +352,47 @@ against a 70.0% ceiling — roughly four queries of real headroom.
 The coverage-scaled containment change reverted in the previous commit should be
 re-tried **against this number**, not the global one, and re-checked against the
 abstention invariant that rejected it the first time.
+
+---
+
+## Coverage-scaled containment — retried against leave-one-out, kept
+
+The change reverted earlier was re-applied and the floor swept against the
+leave-one-out number instead of the global holdout. The floor turns out to be
+load-bearing, and 0.80 is the only value that takes the full gain for free:
+
+| floor | top-1 | top-5 | MRR | romanised | ask-recall | |
+|---|---|---|---|---|---|---|
+| 1.00 | 85.5% | 92.0% | 0.881 | 56.7% | 100% | coverage disabled |
+| 0.90 | 87.0% | 92.0% | 0.889 | 56.7% | 100% | |
+| **0.80** | **88.4%** | **92.0%** | **0.899** | **63.3%** | **100%** | **chosen** |
+| 0.70 | 88.4% | 91.3% | 0.897 | 63.3% | 100% | top-5 starts to fall |
+| 0.60 | 88.4% | 91.3% | 0.897 | 63.3% | 91% | abstention breaks |
+| 0.55 | 88.4% | 91.3% | 0.897 | 63.3% | 91% | the value tried first |
+
+The first attempt used 0.55 by eye, broke
+`test_abstention_catches_every_case_marked_should_ask`, and was reverted. The
+accuracy at 0.55 and at 0.80 is identical — the earlier attempt gave up a safety
+property for nothing.
+
+### Where resolution stands
+
+| | session start | now |
+|---|---|---|
+| top-1 (leave-one-out) | 83.3% | **88.4%** |
+| top-5 | 92.0% | 92.0% |
+| MRR | 0.867 | **0.899** |
+| romanised | 53.3% | **63.3%** |
+| colloquial | 68.8% | **75.0%** |
+| misspelling | 81.2% | **93.8%** |
+| with_quantity | 92.3% | **100.0%** |
+| silent errors | 3.4% | **1.1%** |
+| abstention recall on "should ask" | 100% | 100% |
+
+Romanised at 63.3% now sits against the 70.0% lexeme ceiling — about two queries of
+headroom, both spelling variants (`dosai`, `dose`, still losing to qualified dosa
+siblings). The remaining nine failures are the distinct regional lexemes, which only
+lexicon coverage can fix.
+
+**Do not re-tune the floor by eye.** Re-run the sweep; the accuracy plateau extends
+well past the point where abstention breaks, so a value that looks free is not.

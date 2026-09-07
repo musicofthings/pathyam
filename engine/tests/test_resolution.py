@@ -397,3 +397,81 @@ def test_prior_scaling_rejects_non_positive_factor():
 
     with pytest.raises(PriorError, match="must be positive"):
         Prior("normal", {"mu": 1, "sigma": 1}).scaled(0)
+
+
+# ------------------------------------------------- coverage-scaled containment ----
+#
+# word_similarity scores the best WINDOW, so a one-word query matching one word of a
+# two-word candidate returns a perfect 1.0 -- "dosai" against "ravai dosai" scored the
+# same as against "dosa", and six spellings of plain dosa lost to qualified variants.
+# The containment discount therefore scales with how much of the candidate the query
+# actually accounts for.
+
+
+def _sim(query, surface):
+    from pathyam_engine.resolution.sources import LexiconEntry, _score_entries
+
+    entry = LexiconEntry(1, "k", surface, "en", surface, False)
+    scored = _score_entries(query, [entry], 0.0)
+    return scored[0].similarity if scored else 0.0
+
+
+def test_a_query_naming_every_word_keeps_full_credit():
+    """"masala dosa" accounts for all of "dosa masala" — nothing should be deducted."""
+    full = _sim("masala dosa", "dosa masala")
+    partial = _sim("dosa", "dosa masala")
+    assert full > partial, (
+        "a query naming the whole candidate must outscore one naming half of it"
+    )
+
+
+def test_an_unmatched_qualifier_costs_something():
+    """The dosa-cluster case: a bare head noun vs a qualified variant.
+
+    Before the coverage discount, "dosai" scored a perfect 1.0 against "ravai dosai"
+    and only 0.571 against "dosa", so the qualified variant won outright. The
+    discount brings them level at the entry level; the resolver's base-variant and
+    primary boosts then settle it, which the end-to-end test below checks.
+    """
+    bare = _sim("dosai", "dosa")
+    qualified = _sim("dosai", "ravai dosai")
+    assert qualified < 1.0, "containment on half a candidate must not score perfectly"
+    assert bare >= qualified, (
+        f"'dosai' must not rank 'ravai dosai' ({qualified:.3f}) above 'dosa' "
+        f"({bare:.3f}) — the user never said 'ravai'"
+    )
+
+
+def test_a_bare_dish_name_resolves_to_the_base_dish_not_a_variant():
+    """End to end: the failure this change exists to fix."""
+    from pathyam_engine.resolution import DishResolver, InMemoryCandidateSource
+    from pathyam_engine.resolution.sources import LexiconEntry
+
+    # Models leave-one-out: the query's own spelling ("dosai") is absent, but the
+    # dish keeps its other bare form ("dosa"). That is the realistic case — under the
+    # old global holdout every bare spelling vanished at once and no scoring could
+    # recover the dish.
+    entries = [
+        LexiconEntry(1, "dosa_plain", "Dosa, plain", "en", "Dosa, plain", True,
+                     is_base=True),
+        LexiconEntry(1, "dosa_plain", "Dosa, plain", "en", "dosa", False,
+                     is_base=True),
+        LexiconEntry(1, "dosa_plain", "Dosa, plain", "en", "plain dosa", False,
+                     is_base=True),
+        LexiconEntry(2, "dosa_rava", "Rava dosa", "en", "Rava dosa", True),
+        LexiconEntry(2, "dosa_rava", "Rava dosa", "en", "ravai dosai", False),
+        LexiconEntry(3, "dosa_masala", "Dosa, masala", "en", "Dosa, masala", True),
+    ]
+    resolver = DishResolver(InMemoryCandidateSource(entries))
+
+    best = resolver.resolve_text("dosai")[0].candidates[0]
+    assert best.pathyam_id == "dosa_plain", (
+        f"bare 'dosai' resolved to {best.pathyam_id}, not the base dish"
+    )
+
+
+def test_partial_matches_are_still_offered():
+    """The discount must not suppress genuine partial matches entirely."""
+    assert _sim("dosa", "dosa masala") > 0.2, (
+        "typing 'dosa' must still surface masala dosa as a candidate"
+    )
