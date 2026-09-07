@@ -20,7 +20,9 @@ The compute core is real and tested. Several surrounding features are scaffoldin
 | **Dish resolution** | Indic phonetic folding across Tamil, Kannada, Telugu, Malayalam and Hindi, modifier parsing (*konjam*, *swalpa*, *rendu*), pg_trgm reranking. Measured below. |
 | **Resolution eval harness** | 145 hand-written golden queries including deliberate abstain and absent cases, held-out ablation, abstention calibration. `pathyam_engine/evaluation/harness.py` |
 | **Recipe compiler** | State machine over authored templates: DRAFT → RESOLUTION_REQUIRED / MISSING_COMPOSITION / MISSING_QUANTITY / QC_FAILED → COMPUTABLE → VALIDATED. `pathyam_engine/compiler.py` |
-| **IFCT composition (52 ingredients)** | Hand-entered per-100g values with per-value uncertainties for the ingredients used by the authored templates. `pathyam_engine/authoring/ifct_data.py` |
+| **IFCT 2017 composition** | The published ICMR-NIN table: 542 foods, real IFCT codes, 19,999 analytical values with per-value standard errors, 1,341 native-language names (ta/te/ml/kn). Fetched by `scripts/fetch_ifct.py`, ingested by `authoring/ifct2017.py`. **16 of 17 templates compute (94%).** |
+| **Derived composition** | Foods IFCT has no row for: borrowed from a parent food (tier C, `is_borrowed`) or fixed by chemistry (tier B, derivation recorded). `authoring/derived_foods.py` |
+| **Meal journal** | Persisted to `app.meal_log` / `app.meal_log_item`, per user, soft-deleted. Survives restart. |
 | **REST API** | `/v1/resolve`, `/v1/compute`, `/v1/log`, `/v1/history`, `/v1/templates`, `/v1/news/rss`, `/v1/evidence/explain`. |
 | **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
 | **Web UI** | Single-page app, 6 tabs, served same-origin from `pathyam_api/static/`. Relative API paths throughout. |
@@ -33,8 +35,8 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 |---|---|---|
 | **Meal photo vision** | The configured model id `gemini-3.7-flash` is not a real Gemini model. Any live call fails, and the failure is swallowed — the provider returns a **hardcoded dosa-and-sambar observation** that the caller cannot distinguish from a real reading. | Phase 4 |
 | **`/v1/perception/analyze`** | Never reads the uploaded image. Defaults to `"masala dosa"` and returns a fixed bounding box and confidence. | Phase 4 |
-| **Meal history persistence** | `_JOURNAL_STORE` is a module-level Python list. History, portion edits and the dashboard are lost on restart and shared across every caller. There is no user identity in the API. `db/007_meal_logs_inference.sql` defines the tables this should use. | Phase 2 |
-| **Postgres composition data** | `ref.food_item` lacks composition rows, so templates that compile COMPUTABLE in memory are blocked via the API. The data exists in `ifct_data.py`; it is not loaded. | Phase 2 |
+| **Authentication** | There is none. `X-Pathyam-User` is an unverified, self-asserted header — it makes the persistence layer genuinely per-user, but it is not a credential and anyone who can reach the API can claim any user. | Phase 6 |
+| **Appam template** | Blocked on coconut milk first/second extract, which IFCT 2017 does not carry. These are preparations whose composition depends on the kernel-to-water ratio; picking one would be inventing the number. Next source is USDA FoodData Central (public domain), per the dossier's documented fallback order. | Phase 2 |
 | **Evidence retrieval** | `search_semantic` returns `search_lexical` unchanged — there is no pgvector and no Postgres FTS, so reciprocal rank fusion merges two identical rankings. The corpus is 3 documents in a Python list. | Phase 5 |
 | **Citation validation** | Confirms an identifier *resolves*; does not confirm the resolved record is the work being cited. A fabricated citation with a real-but-unrelated PMID passes. One shipped in this corpus and was removed in Phase 1. | Phase 5 |
 | **CGT glycemic prediction** | `predict_spike` coefficients (1.8, −0.02, −0.04) have no cited derivation. The curve shape and trapezoidal iAUC are correctly implemented; the constants are not sourced. **Do not present its output as clinical guidance.** | Phase 6 |
@@ -88,14 +90,14 @@ flowchart TD
         C1["AST expression sandbox"]:::done
         C2["Monte Carlo + sensitivity attribution"]:::done
         C3["FAO/INFOODS QC gates"]:::done
-        C4["IFCT composition — 52 ingredients, in memory"]:::done
-        C5["IFCT composition loaded into Postgres"]:::pending
+        C4["IFCT 2017 composition — 542 foods in Postgres"]:::done
+        C5["Coconut milk extracts (USDA fallback)"]:::pending
         C6["CGT glycemic prediction<br/>(unsourced coefficients)"]:::partial
     end
 
     subgraph API_UI["4. API & UI"]
         D1["FastAPI service"]:::done
-        D2["Meal history — in-memory only"]:::partial
+        D2["Meal history — persisted per user"]:::done
         D3["Recipe catalog"]:::done
         D4["PubMed news feed"]:::done
         D5["Web app, 6 tabs"]:::done
@@ -108,7 +110,7 @@ flowchart TD
     A3 -.broken.-> B1
     B1 --> B2 --> B3 --> C1 --> C2 --> C3
     C4 --> C2
-    C5 -.not loaded.-> C2
+    C5 -.not sourced.-> C2
     C3 --> D1
     C3 --> C6
     D1 --> D2 & D3 & D4 & D5
@@ -133,7 +135,7 @@ The separation between resolution and computation is load-bearing: `/v1/resolve`
 ./engine/run_tests.sh
 ```
 
-Current result: **266 tests passing** — 207 unit, 59 integration/API. The integration suite seeds a throwaway Postgres from `db/` via `pgserver`; no Docker and no root required.
+Current result: **283 tests passing** — 217 unit, 66 integration/API. The integration suite seeds a throwaway Postgres from `db/` via `pgserver`; no Docker and no root required.
 
 ### Development server
 
@@ -158,7 +160,7 @@ The web UI in `engine/pathyam_api/static/` is a single HTML/CSS/JS application w
 ## Development phases
 
 1. **Restore trust** — fix the build, remove fabricated data and uncomputed metrics, make the docs match the code. *(complete)*
-2. **Real data spine** — load IFCT composition into Postgres, persist the meal journal, introduce user identity.
+2. **Real data spine** — *done, bar one template.* Real IFCT 2017 ingested (542 foods, 19,999 values); journal persisted per user; water conservation bug found and fixed. Appam still needs a coconut-milk source.
 3. **Close the resolution gap** — romanised top-1 from 53.3% to ≥80%.
 4. **Earn the perception layer** — correct the model id, fail loudly, collect a golden meal dataset, publish measured portion error.
 5. **Earn the evidence layer** — validate citations by title/author agreement, build a real corpus, implement both retrieval arms.

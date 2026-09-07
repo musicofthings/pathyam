@@ -94,6 +94,10 @@ step "ingesting IFCT 2017 composition (528 foods)"
 step "loading recipe templates"
 "$PY" -m pathyam_engine.authoring --dir ../db/templates validate
 "$PY" -m pathyam_engine.authoring --dir ../db/templates load >/dev/null
+step "filling composition for foods absent from IFCT 2017"
+"$PY" -m pathyam_engine.authoring derived
+
+step "auditing template computability"
 "$PY" -m pathyam_engine.authoring --dir ../db/templates audit --worklist 6 | head -30
 
 if [[ $SERVE -eq 0 ]]; then

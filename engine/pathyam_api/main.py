@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -32,6 +32,7 @@ from pathyam_engine.vision import GeminiVisionProvider, evaluate_image_quality
 from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 
 from . import schemas as s
+from .journal import JournalRepository, resolve_user_id
 
 _POOL: Any = None
 
@@ -108,6 +109,7 @@ class _Services:
         self.engine = ComputeEngine(self.repo)
         self.source = PostgresCandidateSource(conn)
         self.resolver = DishResolver(self.source)
+        self.journal = JournalRepository(conn)
 
 
 def get_services():
@@ -394,7 +396,11 @@ def _infer_meal_type(dt: datetime.datetime | None = None) -> s.MealType:
 
 
 @app.post("/v1/log", response_model=s.LogResponse, tags=["log"])
-def log(req: s.LogRequest, svc: _Services = Depends(get_services)) -> s.LogResponse:
+def log(
+    req: s.LogRequest,
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> s.LogResponse:
     """Resolve and compute in one call — the primary app path.
 
     Items needing confirmation are returned *unresolved* unless ``auto_accept`` is set
@@ -495,7 +501,7 @@ def log(req: s.LogRequest, svc: _Services = Depends(get_services)) -> s.LogRespo
 
     import uuid
     total_e = _sum_energy(energies)
-    entry_id = f"LOG-{uuid.uuid4().hex[:10]}"
+    entry_id = str(uuid.uuid4())
     log_resp = s.LogResponse(
         id=entry_id,
         items=items,
@@ -506,37 +512,17 @@ def log(req: s.LogRequest, svc: _Services = Depends(get_services)) -> s.LogRespo
         warnings=list(svc.source.warnings),
     )
 
-    # Save to journal store for History & Dashboard
-    total_kcal = total_e.p50 if total_e else 300.0
-    prot_g = 0.0
-    fat_g = 0.0
-    carbs_g = 0.0
-    fibre_g = 0.0
-
-    for it in items:
-        if it.computed and it.computed.nutrients:
-            n = it.computed.nutrients
-            prot_g += n.get("PROCNT", {}).per_serving.p50 if "PROCNT" in n else 0.0
-            fat_g += n.get("FAT", {}).per_serving.p50 if "FAT" in n else 0.0
-            carbs_g += n.get("CHOAVLDF", {}).per_serving.p50 if "CHOAVLDF" in n else 0.0
-            fibre_g += n.get("FIBTG", {}).per_serving.p50 if "FIBTG" in n else 0.0
-
-    peak_g = 95.0 + max(5.0, (carbs_g * 0.68) * 1.8 * 0.8)
-
-    journal_entry = s.JournalEntry(
-        id=entry_id,
+    # Persist. Previously this appended to a module-level list, so history was lost
+    # on restart and shared between every caller.
+    svc.journal.insert_entry(
+        user_id=resolve_user_id(x_pathyam_user),
+        entry_id=entry_id,
         consumed_at=consumed_at_str,
         meal_type=meal_type,
         query_text=req.text,
-        total_kcal=round(total_kcal, 1),
-        protein_g=round(prot_g, 1),
-        fat_g=round(fat_g, 1),
-        carbs_g=round(carbs_g, 1),
-        fibre_g=round(fibre_g, 1),
-        peak_glucose_mg_dl=round(peak_g, 1),
         items=items,
+        region_id=_region_id(svc.conn, req.region_key) if req.region_key else None,
     )
-    _JOURNAL_STORE.insert(0, journal_entry)
 
     return log_resp
 
@@ -544,104 +530,96 @@ def log(req: s.LogRequest, svc: _Services = Depends(get_services)) -> s.LogRespo
 # ------------------------------------------------------- Dashboard & History Endpoints ----
 
 
-_JOURNAL_STORE: list[s.JournalEntry] = []
-
-
 @app.get("/v1/history", response_model=s.HistoryResponse, tags=["history"])
-def get_history(date: str | None = None) -> s.HistoryResponse:
-    """Retrieve logged meal entries for a target date (YYYY-MM-DD or today)."""
+def get_history(
+    date: str | None = None,
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> s.HistoryResponse:
+    """Logged meals for a date (YYYY-MM-DD), or every entry when no date is given."""
     import datetime
 
+    user_id = resolve_user_id(x_pathyam_user)
     target_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
-    matched = [e for e in _JOURNAL_STORE if e.consumed_at.startswith(target_date)]
-    if not matched and not date:
-        matched = _JOURNAL_STORE
 
-    tot_kcal = sum(e.total_kcal for e in matched)
-    tot_p = sum(e.protein_g for e in matched)
-    tot_f = sum(e.fat_g for e in matched)
-    tot_c = sum(e.carbs_g for e in matched)
-    tot_fib = sum(e.fibre_g for e in matched)
+    entries = svc.journal.list_entries(user_id, target_date)
+    if not entries and not date:
+        # No date asked for and nothing today: show the whole journal rather than an
+        # empty screen. An explicit ?date= always means that date, empty or not.
+        entries = svc.journal.list_entries(user_id)
+        target_date = "all"
 
     return s.HistoryResponse(
         date=target_date,
-        count=len(matched),
-        total_kcal=round(tot_kcal, 1),
-        total_protein_g=round(tot_p, 1),
-        total_fat_g=round(tot_f, 1),
-        total_carbs_g=round(tot_c, 1),
-        total_fibre_g=round(tot_fib, 1),
-        entries=matched,
+        count=len(entries),
+        total_kcal=round(sum(e.total_kcal for e in entries), 1),
+        total_protein_g=round(sum(e.protein_g for e in entries), 1),
+        total_fat_g=round(sum(e.fat_g for e in entries), 1),
+        total_carbs_g=round(sum(e.carbs_g for e in entries), 1),
+        total_fibre_g=round(sum(e.fibre_g for e in entries), 1),
+        entries=entries,
     )
 
 
 @app.delete("/v1/history/{entry_id}", tags=["history"])
-def delete_history_entry(entry_id: str) -> dict[str, str]:
-    """Delete a specific meal log entry from history."""
-    global _JOURNAL_STORE
-    _JOURNAL_STORE = [e for e in _JOURNAL_STORE if str(e.id) != str(entry_id)]
+def delete_history_entry(
+    entry_id: str,
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> dict[str, str]:
+    """Soft-delete a logged meal. The row is retained with deleted_at stamped."""
+    if not svc.journal.soft_delete(resolve_user_id(x_pathyam_user), entry_id):
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
     return {"status": "ok", "deleted_id": entry_id}
 
 
 @app.patch("/v1/history/{entry_id}/portion", response_model=s.JournalEntry, tags=["history"])
-def update_entry_portion(entry_id: str, req: s.UpdatePortionRequest) -> s.JournalEntry:
-    """Increment (+1) or decrement (-1) portion count for a specific logged entry."""
-    global _JOURNAL_STORE
-    for idx, entry in enumerate(_JOURNAL_STORE):
-        if str(entry.id) == str(entry_id):
-            curr_portions = 1.0
-            if entry.items and entry.items[0].computed and entry.items[0].computed.portions:
-                curr_portions = float(entry.items[0].computed.portions)
-            
-            new_portions = max(0.5, curr_portions + req.delta)
-            ratio = new_portions / max(0.1, curr_portions)
+def update_entry_portion(
+    entry_id: str,
+    req: s.UpdatePortionRequest,
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> s.JournalEntry:
+    """Shift how much of this meal was eaten. Nutrients scale with servings."""
+    user_id = resolve_user_id(x_pathyam_user)
+    if not svc.journal.adjust_portions(user_id, entry_id, req.delta):
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
 
-            entry.total_kcal = round(max(0.0, entry.total_kcal * ratio), 1)
-            entry.protein_g = round(max(0.0, entry.protein_g * ratio), 1)
-            entry.fat_g = round(max(0.0, entry.fat_g * ratio), 1)
-            entry.carbs_g = round(max(0.0, entry.carbs_g * ratio), 1)
-            entry.fibre_g = round(max(0.0, entry.fibre_g * ratio), 1)
-            entry.peak_glucose_mg_dl = round(95.0 + max(5.0, (entry.carbs_g * 0.68) * 1.8 * 0.8), 1)
-
-            if entry.items and entry.items[0].computed:
-                entry.items[0].computed.portions = new_portions
-
-            _JOURNAL_STORE[idx] = entry
-            return entry
-
-    raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+    entry = svc.journal.get_entry(user_id, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+    return entry
 
 
 @app.get("/v1/dashboard/summary", response_model=s.DailyDashboardSummary, tags=["dashboard"])
-def get_dashboard_summary() -> s.DailyDashboardSummary:
-    """Get today's daily aggregate dashboard summary metrics and goal progress."""
+def get_dashboard_summary(
+    svc: _Services = Depends(get_services),
+    x_pathyam_user: str | None = Header(default=None),
+) -> s.DailyDashboardSummary:
+    """Today's totals against the daily energy target."""
     import datetime
 
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    today_entries = [e for e in _JOURNAL_STORE if e.consumed_at.startswith(today_str)]
-    if not today_entries:
-        today_entries = _JOURNAL_STORE[:5]
+    entries = svc.journal.list_entries(resolve_user_id(x_pathyam_user), today_str)
 
-    tot_kcal = sum(e.total_kcal for e in today_entries)
-    tot_p = sum(e.protein_g for e in today_entries)
-    tot_f = sum(e.fat_g for e in today_entries)
-    tot_c = sum(e.carbs_g for e in today_entries)
-    tot_fib = sum(e.fibre_g for e in today_entries)
-    peak_g = max([e.peak_glucose_mg_dl for e in today_entries], default=95.0)
-
+    tot_kcal = sum(e.total_kcal for e in entries)
+    # 2000 kcal is a generic adult default, not a personalised target. Personalising
+    # it needs the anthropometry and activity data the user has not been asked for.
     target_k = 2000.0
+
     return s.DailyDashboardSummary(
         date=today_str,
         target_kcal=target_k,
         consumed_kcal=round(tot_kcal, 1),
         remaining_kcal=round(max(0.0, target_k - tot_kcal), 1),
-        protein_g=round(tot_p, 1),
-        fat_g=round(tot_f, 1),
-        carbs_g=round(tot_c, 1),
-        fibre_g=round(tot_fib, 1),
-        daily_peak_glucose_mg_dl=round(peak_g, 1),
-        meals_logged_count=len(today_entries),
-        recent_entries=today_entries[:3],
+        protein_g=round(sum(e.protein_g for e in entries), 1),
+        fat_g=round(sum(e.fat_g for e in entries), 1),
+        carbs_g=round(sum(e.carbs_g for e in entries), 1),
+        fibre_g=round(sum(e.fibre_g for e in entries), 1),
+        daily_peak_glucose_mg_dl=round(
+            max([e.peak_glucose_mg_dl for e in entries], default=95.0), 1),
+        meals_logged_count=len(entries),
+        recent_entries=entries[:3],
     )
 
 

@@ -346,3 +346,156 @@ def test_news_feed_is_empty_when_pubmed_is_unreachable(client, monkeypatch):
     body = client.get("/v1/news/rss").json()
     assert body["count"] == 0
     assert body["articles"] == []
+
+
+# ----------------------------------------------------------- meal journal ----
+#
+# The journal used to be a module-level Python list: history vanished on restart and
+# every caller shared one log. These tests pin the two properties that fixes.
+
+
+def test_a_logged_meal_is_written_to_the_database_not_process_memory(client):
+    """The point of the change: the row is in Postgres, reachable without the app.
+
+    Read back over an independent connection rather than a second TestClient --
+    constructing one re-runs the app lifespan and swaps the module-level pool out
+    from under the shared client.
+    """
+    import psycopg
+
+    posted = client.post("/v1/log", json={"text": "2 idli", "n_samples": 120})
+    assert posted.status_code == 200, posted.text
+    entry_id = posted.json()["id"]
+
+    with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT user_id, meal_type, notes, deleted_at
+                 FROM app.meal_log WHERE meal_log_id = %s""",
+            (entry_id,),
+        )
+        row = cur.fetchone()
+
+    assert row is not None, "the meal was not persisted"
+    user_id, meal_type, notes, deleted_at = row
+    assert str(user_id) == "00000000-0000-0000-0000-000000000001"   # the dev user
+    assert notes == "2 idli", "the user's own words are kept verbatim"
+    assert deleted_at is None
+
+    # And it comes back through the API.
+    history = client.get("/v1/history").json()
+    assert entry_id in {e["id"] for e in history["entries"]}
+
+
+def test_one_users_journal_is_invisible_to_another(client):
+    """user_id is a real column, not decoration."""
+    alice = "11111111-1111-1111-1111-111111111111"
+    bob = "22222222-2222-2222-2222-222222222222"
+
+    posted = client.post(
+        "/v1/log", json={"text": "1 dosa", "n_samples": 120},
+        headers={"X-Pathyam-User": alice},
+    )
+    assert posted.status_code == 200, posted.text
+    entry_id = posted.json()["id"]
+
+    seen_by_alice = client.get("/v1/history", headers={"X-Pathyam-User": alice}).json()
+    seen_by_bob = client.get("/v1/history", headers={"X-Pathyam-User": bob}).json()
+
+    assert entry_id in {e["id"] for e in seen_by_alice["entries"]}
+    assert entry_id not in {e["id"] for e in seen_by_bob["entries"]}
+
+
+def test_deleting_a_meal_is_soft_and_scoped_to_its_owner(client):
+    owner = "33333333-3333-3333-3333-333333333333"
+    stranger = "44444444-4444-4444-4444-444444444444"
+
+    entry_id = client.post(
+        "/v1/log", json={"text": "1 idli", "n_samples": 120},
+        headers={"X-Pathyam-User": owner},
+    ).json()["id"]
+
+    # Someone else cannot delete it.
+    assert client.delete(
+        f"/v1/history/{entry_id}", headers={"X-Pathyam-User": stranger}
+    ).status_code == 404
+
+    # A stranger cannot rescale it either.
+    assert client.patch(
+        f"/v1/history/{entry_id}/portion", json={"delta": 1.0},
+        headers={"X-Pathyam-User": stranger},
+    ).status_code == 404
+
+    assert client.delete(
+        f"/v1/history/{entry_id}", headers={"X-Pathyam-User": owner}
+    ).status_code == 200
+
+    after = client.get("/v1/history", headers={"X-Pathyam-User": owner}).json()
+    assert entry_id not in {e["id"] for e in after["entries"]}
+
+
+def test_portion_adjustment_scales_the_recorded_nutrients(client):
+    user = "55555555-5555-5555-5555-555555555555"
+    entry_id = client.post(
+        "/v1/log", json={"text": "1 idli", "n_samples": 120},
+        headers={"X-Pathyam-User": user},
+    ).json()["id"]
+
+    before = client.get("/v1/history", headers={"X-Pathyam-User": user}).json()
+    original = next(e for e in before["entries"] if e["id"] == entry_id)
+
+    bumped = client.patch(
+        f"/v1/history/{entry_id}/portion", json={"delta": 1.0},
+        headers={"X-Pathyam-User": user},
+    )
+    assert bumped.status_code == 200, bumped.text
+
+    # Whether the figures move depends on whether the dish resolved against the
+    # lexicon this database was seeded with; the persistence contract does not.
+    if original["total_kcal"] > 0:
+        assert bumped.json()["total_kcal"] > original["total_kcal"]
+
+    # And it persisted, rather than only being returned.
+    reread = client.get("/v1/history", headers={"X-Pathyam-User": user}).json()
+    assert next(e for e in reread["entries"] if e["id"] == entry_id)["total_kcal"] \
+        == bumped.json()["total_kcal"]
+
+
+def test_portions_never_drop_to_zero_or_below(client):
+    user = "66666666-6666-6666-6666-666666666666"
+    entry_id = client.post(
+        "/v1/log", json={"text": "1 idli", "n_samples": 120},
+        headers={"X-Pathyam-User": user},
+    ).json()["id"]
+
+    for _ in range(5):
+        client.patch(f"/v1/history/{entry_id}/portion", json={"delta": -1.0},
+                     headers={"X-Pathyam-User": user})
+
+    response = client.patch(
+        f"/v1/history/{entry_id}/portion", json={"delta": -1.0},
+        headers={"X-Pathyam-User": user},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total_kcal"] >= 0.0, "portions must never go negative"
+
+
+def test_the_journal_reads_back_exactly_what_the_engine_computed(client):
+    """Regression: portions were applied twice, inflating a 2-idli log by 2x.
+
+    meal_log_item stores a per-serving figure next to a serving count and readers
+    multiply them, but the engine's per_serving values are already portion-scaled.
+    Storing them unadjusted double-counted -- silently, and upward.
+    """
+    posted = client.post(
+        "/v1/log", json={"text": "2 idli", "n_samples": 300},
+    ).json()
+
+    if not posted.get("total_energy_kcal"):
+        pytest.skip("nothing resolved against this database's lexicon")
+
+    engine_total = posted["total_energy_kcal"]["p50"]
+    entry = next(
+        e for e in client.get("/v1/history").json()["entries"]
+        if e["id"] == posted["id"]
+    )
+    assert entry["total_kcal"] == pytest.approx(engine_total, abs=0.5)

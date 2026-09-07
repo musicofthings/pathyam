@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .audit import audit as run_audit
 from .lexicon import load_lexicon_file, load_lexicon_into_postgres
+from .derived_foods import load_derived_foods
 from .ifct2017 import load_ifct_into_postgres
 from .loader import load_into_postgres
 from .schema import load_library
@@ -113,6 +114,23 @@ def cmd_ifct(args) -> int:
     return 0
 
 
+def cmd_derived(args) -> int:
+    """Fill composition for foods IFCT 2017 has no row for (borrowed / definitional)."""
+    import psycopg
+
+    with psycopg.connect(args.dsn) as conn:
+        result = load_derived_foods(conn, dry_run=args.dry_run)
+
+    print(json.dumps(result.as_dict(), indent=2))
+    if result.skipped:
+        print("\n  skipped:")
+        for item in result.skipped:
+            print(f"    - {item}")
+    if args.dry_run:
+        print("\n(dry run — rolled back)")
+    return 0
+
+
 def cmd_audit(args) -> int:
     import psycopg
 
@@ -195,6 +213,12 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--dry-run", action="store_true")
     i.set_defaults(func=cmd_ifct)
 
+    d = sub.add_parser("derived",
+                       help="fill composition for foods absent from IFCT 2017")
+    d.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
+    d.add_argument("--dry-run", action="store_true")
+    d.set_defaults(func=cmd_derived)
+
     a = sub.add_parser("audit", help="report computable templates and the ingredient worklist")
     a.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
     a.add_argument("--samples", type=int, default=800)
@@ -203,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=cmd_audit)
 
     args = parser.parse_args(argv)
-    if args.command in {"load", "audit", "ifct"} and not args.dsn:
+    if args.command in {"load", "audit", "ifct", "derived"} and not args.dsn:
         parser.error("no DSN: pass --dsn or set PATHYAM_DSN")
     return args.func(args)
 
