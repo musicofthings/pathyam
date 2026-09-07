@@ -1,13 +1,33 @@
-"""Hybrid Retrieval Engine with Reciprocal Rank Fusion (RRF).
+"""Evidence retrieval over the curated corpus.
 
-Combines:
-  1. Lexical BM25 / PostgreSQL FTS (tsvector)
-  2. Vector semantic search (pgvector HNSW)
-  3. Reciprocal Rank Fusion (RRF) to merge rank orderings
+WHAT THIS ACTUALLY IS, stated plainly because the previous docstring did not.
+
+It is a **keyword matcher** over a small in-memory corpus: term overlap against each
+document's title, body and authors. That is all. There is no BM25, no PostgreSQL
+full-text search, and no pgvector.
+
+The previous docstring advertised "Lexical BM25 / PostgreSQL FTS (tsvector)" and
+"Vector semantic search (pgvector HNSW)" fused by reciprocal rank. In fact
+``search_semantic`` returned ``search_lexical`` unchanged, so the fusion combined two
+identical rankings and could not reorder anything -- an expensive no-op wearing the
+name of a technique. That description is what the phrase "Evidence engine" in the
+release notes was resting on.
+
+:func:`reciprocal_rank_fusion` is correct and kept. It has nothing to fuse yet, and
+becomes useful the moment a genuinely different retrieval arm exists.
+
+TO MAKE THIS REAL
+-----------------
+The corpus needs to live in Postgres rather than in this file, with a ``tsvector``
+column for lexical search and an embedding column for semantic search. The second
+needs an embedding provider, which this repository has no credentials for -- so
+adding a ``search_semantic`` that quietly returns keyword results again would be
+worse than having none. Until then there is one arm, and it is named for what it does.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Sequence
 
 from .protocol import EvidenceDocument, EvidenceTier
@@ -100,15 +120,23 @@ class HybridEvidenceRetriever:
                 matches.append((score, doc))
 
         matches.sort(key=lambda x: x[0], reverse=True)
-        return [m[1] for m in matches[:limit]]
+        # Attach the score to the returned documents. Callers rank on it, and
+        # previously it was left at the dataclass default of 0.0 unless the value
+        # happened to pass through reciprocal_rank_fusion.
+        return [
+            replace(doc, score=score) for score, doc in matches[:limit]
+        ]
 
-    def search_semantic(self, query: str, limit: int = 5) -> list[EvidenceDocument]:
-        # Keyword-overlap semantic scoring approximation for offline tests
+    def retrieve(self, query: str, limit: int = 5) -> list[EvidenceDocument]:
+        """Rank the corpus for a query. One arm, so no fusion is performed.
+
+        Running :func:`reciprocal_rank_fusion` over a single ranking would only
+        rewrite the scores into RRF units while preserving the order, which reads
+        like fusion is happening. It is not.
+        """
         return self.search_lexical(query, limit=limit)
 
-    def retrieve_hybrid(self, query: str, limit: int = 5) -> list[EvidenceDocument]:
-        lex_rank = self.search_lexical(query, limit=limit * 2)
-        sem_rank = self.search_semantic(query, limit=limit * 2)
-
-        rrf_fused = reciprocal_rank_fusion([lex_rank, sem_rank])
-        return rrf_fused[:limit]
+    # Kept so existing callers do not break. Deliberately not named "hybrid": there
+    # is one retrieval arm, and calling it hybrid is how the previous version came to
+    # describe a keyword matcher as pgvector + BM25.
+    retrieve_hybrid = retrieve

@@ -14,24 +14,18 @@ from pathyam_engine.evidence import (
 )
 
 
-def test_citation_validator_validates_known_pmid_and_doi():
-    validator = CitationValidator()
+def test_a_registered_guideline_still_verifies_offline():
+    """The only check that needs no network.
 
-    # Valid PMID
-    res_pmid = validator.validate_pmid("35875218")
-    assert res_pmid.is_valid
-    assert not res_pmid.suppressed
-    assert "South Indian" in str(res_pmid.title_match)
-
-    # Valid DOI
-    res_doi = validator.validate_doi("10.1007/s13197-022-05368-6")
-    assert res_doi.is_valid
-    assert not res_doi.suppressed
-
-    # Valid Guideline
-    res_guide = validator.validate_guideline("ICMR-NIN-DGI-2024")
-    assert res_guide.is_valid
-    assert not res_guide.suppressed
+    This replaces a test that asserted validate_pmid("35875218") with no claimed
+    title was valid. Under the current contract that is UNVERIFIED, deliberately:
+    a resolving identifier proves existence, not that it supports the claim. The
+    PMID and DOI paths are covered against stubbed registries in
+    tests/test_citation_validation.py, which also does not touch the network.
+    """
+    result = CitationValidator().validate_guideline("ICMR-NIN-DGI-2024")
+    assert result.is_valid
+    assert not result.suppressed
 
 
 def test_citation_validator_suppresses_fake_pmid_and_doi():
@@ -49,9 +43,9 @@ def test_citation_validator_suppresses_fake_pmid_and_doi():
     assert res_fake_doi.suppressed
 
 
-def test_hybrid_retriever_reciprocal_rank_fusion():
+def test_retriever_ranks_and_scores_the_corpus():
     retriever = HybridEvidenceRetriever()
-    results = retriever.retrieve_hybrid("idli glycemic index fermentation", limit=2)
+    results = retriever.retrieve("idli glycemic index fermentation", limit=2)
 
     assert len(results) >= 1
     assert any("35875218" in str(r.pmid) or "2024" in str(r.title) for r in results)

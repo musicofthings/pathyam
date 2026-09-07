@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -22,8 +24,13 @@ _NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 _NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
 # E-utilities allows 3 requests/second unauthenticated, 10/second with an API key.
-# Set NCBI_API_KEY to raise the ceiling; nothing here retries on a 429.
+# Exceeding it earns a 429, and because request failures return None, a throttled
+# client presents as citations quietly failing to verify -- the worst possible
+# symptom for this module. So the limit is enforced client-side rather than
+# discovered.
 _API_KEY_ENV = "NCBI_API_KEY"
+_RATE_UNAUTHENTICATED = 3.0
+_RATE_WITH_KEY = 10.0
 
 
 class NCBIClient:
@@ -39,6 +46,22 @@ class NCBIClient:
         self.tool = tool
         self.api_key = api_key or os.environ.get(_API_KEY_ENV)
         self._cache: dict[str, dict[str, Any]] = {}
+        rate = _RATE_WITH_KEY if self.api_key else _RATE_UNAUTHENTICATED
+        self._min_interval = 1.0 / rate
+        self._last_request = 0.0
+        self._lock = threading.Lock()
+
+    def _throttle(self) -> None:
+        """Space requests to stay inside the E-utilities rate limit.
+
+        Locked because FastAPI runs sync endpoints in a threadpool, so several
+        requests can reach this client at once.
+        """
+        with self._lock:
+            wait = self._min_interval - (time.monotonic() - self._last_request)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request = time.monotonic()
 
     def _params(self, **kw: str) -> dict[str, str]:
         params = {"tool": self.tool, "email": self.email, **kw}
@@ -48,6 +71,7 @@ class NCBIClient:
 
     def _get(self, url: str, params: dict[str, str], timeout: int = 8) -> bytes | None:
         full = f"{url}?{urllib.parse.urlencode(params)}"
+        self._throttle()
         try:
             req = urllib.request.Request(full, headers={"User-Agent": f"Pathyam/{self.tool}"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -123,28 +147,27 @@ class NCBIClient:
         if pmid_clean in self._cache:
             return self._cache[pmid_clean]
 
-        params = {
-            "db": "pubmed",
-            "id": pmid_clean,
-            "retmode": "json",
-            "tool": self.tool,
-            "email": self.email,
-        }
-        url = f"{_NCBI_ESUMMARY_URL}?{urllib.parse.urlencode(params)}"
+        # Goes through _get so it picks up the throttle and the API key. It used to
+        # build its own request, so the single-PMID path -- the one the citation
+        # validator uses on every check -- was both unthrottled and unauthenticated.
+        raw = self._get(
+            _NCBI_ESUMMARY_URL,
+            self._params(db="pubmed", id=pmid_clean, retmode="json"),
+        )
+        if raw is None:
+            return None
 
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": f"Pathyam/{self.tool}"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                raw_bytes = resp.read()
-                data = json.loads(raw_bytes.decode("utf-8"))
-                result_map = data.get("result", {})
-                doc_summary = result_map.get(pmid_clean)
-                if doc_summary:
-                    self._cache[pmid_clean] = doc_summary
-                    return doc_summary
-        except Exception:
-            pass
+            result = json.loads(raw.decode("utf-8")).get("result", {})
+        except (ValueError, UnicodeDecodeError):
+            return None
 
+        doc = result.get(pmid_clean)
+        # esummary reports an unresolvable id as a doc carrying an "error" key, which
+        # is a real answer ("no such record"), not a transport failure.
+        if isinstance(doc, dict) and "error" not in doc and doc.get("title"):
+            self._cache[pmid_clean] = doc
+            return doc
         return None
 
     def search_pubmed(

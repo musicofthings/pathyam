@@ -57,23 +57,36 @@ class EvidenceDocument:
 
 @dataclass(frozen=True)
 class CitationVerificationResult:
+    """Outcome of checking that an identifier resolves to the work being cited.
+
+    ``status`` is the field to read. ``is_valid`` is kept as a convenience for
+    existing callers and is true only for VERIFIED, but it cannot express the
+    distinction that matters: UNVERIFIED means the registry was unreachable and says
+    nothing about the claim, while CONTRADICTED means the identifier resolves to a
+    different work. Collapsing those two is what let a fabricated citation ship.
+    """
+
     is_valid: bool
+    status: str = "UNVERIFIED"                # VERIFIED | UNVERIFIED | CONTRADICTED
     pmid: str | None = None
     doi: str | None = None
     verification_source: str = ""             # 'ncbi', 'crossref', 'guideline_registry'
-    title_match: str | None = None
+    title_match: str | None = None            # what the registry says the work IS
     suppressed: bool = False
     failure_reason: str | None = None
+    agreement: float | None = None            # title similarity, where computed
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "is_valid": self.is_valid,
+            "status": self.status,
             "pmid": self.pmid,
             "doi": self.doi,
             "verification_source": self.verification_source,
             "title_match": self.title_match,
             "suppressed": self.suppressed,
             "failure_reason": self.failure_reason,
+            "agreement": None if self.agreement is None else round(self.agreement, 3),
         }
 
 
@@ -99,6 +112,10 @@ class ExplanationResult:
     claims: list[EvidenceClaim]
     retrieved_documents: list[EvidenceDocument]
     suppressed_citations_count: int = 0
+    # Identifiers that resolve to a DIFFERENT work than the claim cites. Not the same
+    # as a suppressed citation: this is a corpus defect, and a non-empty list should
+    # fail a build rather than be rendered.
+    contradicted_citations: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -106,4 +123,5 @@ class ExplanationResult:
             "claims": [c.as_dict() for c in self.claims],
             "retrieved_documents": [d.as_dict() for d in self.retrieved_documents],
             "suppressed_citations_count": self.suppressed_citations_count,
+            "contradicted_citations": self.contradicted_citations,
         }

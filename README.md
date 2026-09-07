@@ -27,6 +27,7 @@ The compute core is real and tested. Several surrounding features are scaffoldin
 | **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
 | **Web UI** | Single-page app, 6 tabs, served same-origin from `pathyam_api/static/`. Relative API paths throughout. |
 | **Vision fails honestly** | No default model id, no silent mock fallback. Missing key or model → 501; upstream failure → 502. The offline mock is reachable only via `PATHYAM_MOCK_VISION` and is stamped `model_version="mock"`. |
+| **Citation verification** | Checks that an identifier resolves to the work being cited — title, authors, year — not merely that it exists. Three-valued: VERIFIED / UNVERIFIED (registry unreachable) / CONTRADICTED (resolves to a different work). Verified live against the fabricated citation that shipped. `evidence/citation_validator.py` |
 
 ### Known gaps
 
@@ -38,8 +39,8 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 | **Portion accuracy is unmeasured** | No golden meal dataset exists, so portion MAPE and nutrient error are unknown. Vision output must not be presented as accurate until ≥50 photographed meals with weighed component masses are collected. | Phase 4 |
 | **Authentication** | There is none. `X-Pathyam-User` is an unverified, self-asserted header — it makes the persistence layer genuinely per-user, but it is not a credential and anyone who can reach the API can claim any user. | Phase 6 |
 | **Appam template** | Blocked on coconut milk first/second extract, which IFCT 2017 does not carry. These are preparations whose composition depends on the kernel-to-water ratio; picking one would be inventing the number. Next source is USDA FoodData Central (public domain), per the dossier's documented fallback order. | Phase 2 |
-| **Evidence retrieval** | `search_semantic` returns `search_lexical` unchanged — there is no pgvector and no Postgres FTS, so reciprocal rank fusion merges two identical rankings. The corpus is 3 documents in a Python list. | Phase 5 |
-| **Citation validation** | Confirms an identifier *resolves*; does not confirm the resolved record is the work being cited. A fabricated citation with a real-but-unrelated PMID passes. One shipped in this corpus and was removed in Phase 1. | Phase 5 |
+| **Evidence retrieval is a keyword matcher** | One arm: term overlap over a 3-document in-memory corpus. No BM25, no Postgres FTS, no pgvector — the module now says so rather than claiming otherwise. Making it real needs the corpus in Postgres and an embedding provider this repo has no credentials for. | Phase 5 |
+| **Evidence corpus is 3 documents** | Enough to exercise the pipeline, not enough to answer clinical questions. | Phase 5 |
 | **CGT glycemic prediction** | `predict_spike` coefficients (1.8, −0.02, −0.04) have no cited derivation. The curve shape and trapezoidal iAUC are correctly implemented; the constants are not sourced. **Do not present its output as clinical guidance.** | Phase 6 |
 | **`/v1/cgt/telemetry`** | Echoes its input. Stores nothing, used by nothing. | Phase 6 |
 | **Safety benchmarks** | The suite computes correctly, but **no golden meal dataset exists** — the only samples are two synthetic rows in a unit test. It has nothing to measure. | Phase 4 |
