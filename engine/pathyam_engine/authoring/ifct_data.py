@@ -1,8 +1,19 @@
-"""Reference IFCT 2017 Composition Dataset & Repository Builder for Pathyam.
+"""In-memory test fixture. NOT the composition source of truth.
 
-Provides standardized nutrient composition per 100g for all 52 ingredients defined in
-`db/templates/ingredients.yaml`, and builds fully functional InMemoryRepository instances
-containing all 17 authored templates.
+The real composition pipeline is `ifct2017.py`, which ingests the published
+ICMR-NIN table (528 foods, real IFCT codes, per-value standard errors) fetched by
+`scripts/fetch_ifct.py`. Use that for anything that computes a number a person sees.
+
+The values below are hand-entered approximations of IFCT 2017 figures. They are
+close but demonstrably not the published values -- checked against the real table,
+"Rice, parboiled, milled" (A014) is 351.6 kcal, 77.16 g carbohydrate and 3.74 g
+fibre per 100 g, where this file says 346, 74.80 and 2.81. They are kept only
+because the unit tests need a small repository that runs without a database or a
+network fetch, and because a fixture with plausible ratios exercises the engine's
+arithmetic perfectly well.
+
+Do not add ingredients here to make a dish computable. Add the IFCT code to
+`db/templates/ingredients.yaml` instead, so the real table supplies the values.
 """
 
 from __future__ import annotations
@@ -40,12 +51,20 @@ NUTRIENTS = [
     Nutrient(8, "THIA", "Thiamine", "mg", 3, "vitamin", False),
 ]
 
+# is_commercial_cleared MUST stay False. IFCT 2017 is ICMR-NIN copyright and is
+# free-to-read, not established as free-to-commercialise (dossier risk R1); the
+# database seed in db/010_seed_example.sql deliberately marks it uncleared so it
+# surfaces in ref.v_uncleared_values, which is the release gate. This constant
+# previously claimed True, which would have silently disarmed that gate.
 SOURCES = [
     SourceRef(
         source_key="IFCT2017",
-        citation="Longvah T, et al. Indian Food Composition Tables 2017. ICMR-NIN.",
-        licence="ICMR Copyright",
-        is_commercial_cleared=True,
+        citation=(
+            "Longvah T, Ananthan R, Bhaskarachary K, Venkaiah K. "
+            "Indian Food Composition Tables 2017. ICMR-NIN, Hyderabad."
+        ),
+        licence="Not stated - ICMR copyright",
+        is_commercial_cleared=False,
     )
 ]
 

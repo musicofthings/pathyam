@@ -124,7 +124,7 @@ class ComputeEngine:
         cooked_total = raw_total * yield_factor
 
         nutrients, sources_used, tier_by_nutrient, missing_mass = self._compute_nutrients(
-            draws, ctx, cooked_total, n_servings, portions,
+            draws, ctx, cooked_total, raw_total, n_servings, portions,
             sample_sd=sample_composition_sd, warnings=warnings,
         )
 
@@ -269,6 +269,7 @@ class ComputeEngine:
         draws: Sequence[IngredientDraw],
         ctx: "_SampleContext",
         cooked_total: np.ndarray,
+        raw_total: np.ndarray,
         n_servings: float,
         portions: float,
         *,
@@ -360,6 +361,39 @@ class ComputeEngine:
                 f"{missing_share:.0%} of raw mass has no composition data — "
                 f"the result is an underestimate, not an estimate"
             )
+
+        # Conserve water across cooking.
+        #
+        # The yield factor changes the dish's mass: idli batter at 64 g raw steams to
+        # 181 g, a dosa loses mass on the griddle. That mass difference IS water --
+        # absorbed during soaking and steaming, or driven off by heat. Every other
+        # nutrient is correctly diluted or concentrated by dividing the raw total by
+        # the cooked mass, but WATER is the one nutrient whose absolute amount also
+        # changes, so carrying the raw figure through leaves it badly wrong: idli
+        # reported 3.4 g water per 100 g against a real value near 65 g, and the
+        # proximates summed to 35 g instead of 100 g.
+        #
+        # This was invisible until IFCT composition landed, because no WATER values
+        # existed to sum. The proximate_sum QC gate is what surfaced it.
+        water = acc.get("WATER")
+        if water is not None:
+            delta = cooked_total - raw_total
+            adjusted = water.total + delta
+            # Water cannot go negative, and cannot exceed the cooked mass.
+            water.total = np.clip(adjusted, 0.0, cooked_total)
+
+            # Clamping at zero means the yield factor asks the dish to lose more
+            # water than its ingredients contain. That is a disagreement between the
+            # template's yield and its composition, not a rounding artefact: the
+            # remaining solids get over-concentrated and the proximates stop summing
+            # to 100 g. Say so rather than returning a quietly impossible dish.
+            shortfall = float(np.mean(adjusted < -1e-9))
+            if shortfall > 0.05:
+                warnings.append(
+                    f"yield factor removes more water than the ingredients contain "
+                    f"in {shortfall:.0%} of samples - the yield and the composition "
+                    f"disagree; nutrients per 100 g will read high"
+                )
 
         tier_by_nutrient: dict[str, str] = {}
         for tag, bucket in acc.items():

@@ -105,11 +105,20 @@ def audit(
 
     # Which authored ingredients exist in the database with usable composition?
     have_composition: set[str] = set()
+
+    # Match on IFCT code first. The authored English name is deliberately not the
+    # IFCT name ("Chilli, green" vs "Chillies, green - all varieties"), so matching
+    # on name alone reports ingredients as missing composition that in fact have it.
+    code_to_key = {
+        ing.ifct_code: key
+        for key, ing in library.ingredients.items()
+        if ing.ifct_code
+    }
     name_to_key = {ing.en: key for key, ing in library.ingredients.items()}
     food_ids: dict[str, int] = {}
 
     for food_id, meta in _all_foods(repository):
-        key = name_to_key.get(meta.get("name", ""))
+        key = code_to_key.get(meta.get("ifct_code")) or name_to_key.get(meta.get("name", ""))
         if key:
             food_ids[key] = food_id
     if food_ids:

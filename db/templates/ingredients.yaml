@@ -28,69 +28,69 @@
 ingredients:
 
   # ── cereals and millets ───────────────────────────────────────────────────
-  - {key: rice_parboiled,   en: "Rice, parboiled, milled",  group: cereal, ifct_code: A007, density: 0.850}
-  - {key: rice_raw,         en: "Rice, raw, milled",        group: cereal, ifct_code: A006, density: 0.850}
+  - {key: rice_parboiled,   en: "Rice, parboiled, milled",  group: cereal, ifct_code: A014, density: 0.850}
+  - {key: rice_raw,         en: "Rice, raw, milled",        group: cereal, ifct_code: A015, density: 0.850}
   - {key: rice_flakes,      en: "Rice flakes (poha/aval)",  group: cereal, ifct_code: A011, density: 0.330}
-  - {key: rice_flour,       en: "Rice flour",               group: cereal, ifct_code: A008, density: 0.590}
-  - {key: semolina,         en: "Semolina (rava/sooji)",    group: cereal, ifct_code: A027, density: 0.680}
-  - {key: wheat_flour,      en: "Wheat flour, refined (maida)", group: cereal, ifct_code: A029, density: 0.590}
-  - {key: ragi_flour,       en: "Finger millet flour (ragi)", group: cereal, ifct_code: A012, density: 0.700}
-  - {key: broken_wheat,     en: "Broken wheat (dalia)",     group: cereal, ifct_code: A031, density: 0.720}
+  - {key: rice_flour,       en: "Rice flour",               group: cereal, density: 0.590}
+  - {key: semolina,         en: "Semolina (rava/sooji)",    group: cereal, ifct_code: A022, density: 0.680}
+  - {key: wheat_flour,      en: "Wheat flour, refined (maida)", group: cereal, ifct_code: A018, density: 0.590}
+  - {key: ragi_flour,       en: "Finger millet flour (ragi)", group: cereal, ifct_code: A010, density: 0.700}
+  - {key: broken_wheat,     en: "Broken wheat (dalia)",     group: cereal, ifct_code: A021, density: 0.720}
 
   # ── pulses ────────────────────────────────────────────────────────────────
-  - {key: urad_dal,         en: "Black gram dhal, dehusked", group: pulse, ifct_code: B015, density: 0.820}
-  - {key: toor_dal,         en: "Red gram dhal (toor/thuvaram)", group: pulse, ifct_code: B023, density: 0.830}
-  - {key: moong_dal,        en: "Green gram dhal, dehusked", group: pulse, ifct_code: B011, density: 0.820}
-  - {key: chana_dal,        en: "Bengal gram dhal",         group: pulse, ifct_code: B003, density: 0.830}
+  - {key: urad_dal,         en: "Black gram dhal, dehusked", group: pulse, ifct_code: B003, density: 0.820}
+  - {key: toor_dal,         en: "Red gram dhal (toor/thuvaram)", group: pulse, ifct_code: B021, density: 0.830}
+  - {key: moong_dal,        en: "Green gram dhal, dehusked", group: pulse, ifct_code: B010, density: 0.820}
+  - {key: chana_dal,        en: "Bengal gram dhal",         group: pulse, ifct_code: B001, density: 0.830}
   - {key: bengal_gram_whole, en: "Bengal gram, whole",      group: pulse, ifct_code: B002, density: 0.800}
 
   # ── vegetables ────────────────────────────────────────────────────────────
-  - {key: potato,           en: "Potato",                   group: vegetable, ifct_code: D010, density: 0.940, edible_pct: 85}
-  - {key: onion,            en: "Onion, big",               group: vegetable, ifct_code: D021, density: 0.960, edible_pct: 88}
-  - {key: shallot,          en: "Onion, small (sambar onion)", group: vegetable, ifct_code: D022, density: 0.960, edible_pct: 80}
-  - {key: tomato,           en: "Tomato, ripe",             group: vegetable, ifct_code: D030, density: 0.950, edible_pct: 97}
-  - {key: drumstick,        en: "Drumstick",                group: vegetable, ifct_code: D009, density: 0.900, edible_pct: 45}
-  - {key: brinjal,          en: "Brinjal",                  group: vegetable, ifct_code: D004, density: 0.930, edible_pct: 92}
-  - {key: carrot,           en: "Carrot",                   group: vegetable, ifct_code: D006, density: 0.950, edible_pct: 90}
-  - {key: beans_french,     en: "French beans",             group: vegetable, ifct_code: D003, density: 0.900, edible_pct: 90}
+  - {key: potato,           en: "Potato",                   group: vegetable, ifct_code: F006, density: 0.940, edible_pct: 85}
+  - {key: onion,            en: "Onion, big",               group: vegetable, ifct_code: G017, density: 0.960, edible_pct: 88}
+  - {key: shallot,          en: "Onion, small (sambar onion)", group: vegetable, ifct_code: G018, density: 0.960, edible_pct: 80}
+  - {key: tomato,           en: "Tomato, ripe",             group: vegetable, ifct_code: D076, density: 0.950, edible_pct: 97}
+  - {key: drumstick,        en: "Drumstick",                group: vegetable, ifct_code: D046, density: 0.900, edible_pct: 45}
+  - {key: brinjal,          en: "Brinjal",                  group: vegetable, ifct_code: D031, density: 0.930, edible_pct: 92}
+  - {key: carrot,           en: "Carrot",                   group: vegetable, ifct_code: F003, density: 0.950, edible_pct: 90}
+  - {key: beans_french,     en: "French beans",             group: vegetable, ifct_code: D049, density: 0.900, edible_pct: 90}
   - {key: ash_gourd,        en: "Ash gourd",                group: vegetable, ifct_code: D001, density: 0.950, edible_pct: 70}
-  - {key: curry_leaf,       en: "Curry leaves",             group: vegetable, ifct_code: E009, density: 0.300}
-  - {key: green_chilli,     en: "Chilli, green",            group: vegetable, ifct_code: D008, density: 0.850}
-  - {key: coriander_leaf,   en: "Coriander leaves",         group: vegetable, ifct_code: E006, density: 0.300}
-  - {key: ginger,           en: "Ginger, fresh",            group: spice, ifct_code: S013, density: 0.900}
-  - {key: garlic,           en: "Garlic",                   group: spice, ifct_code: S011, density: 0.900, edible_pct: 87}
+  - {key: curry_leaf,       en: "Curry leaves",             group: vegetable, ifct_code: G010, density: 0.300}
+  - {key: green_chilli,     en: "Chilli, green",            group: vegetable, ifct_code: G008, density: 0.850}
+  - {key: coriander_leaf,   en: "Coriander leaves",         group: vegetable, ifct_code: G009, density: 0.300}
+  - {key: ginger,           en: "Ginger, fresh",            group: spice, ifct_code: G014, density: 0.900}
+  - {key: garlic,           en: "Garlic",                   group: spice, ifct_code: G011, density: 0.900, edible_pct: 87}
 
   # ── coconut, in the forms that matter ─────────────────────────────────────
   # Water content differs 3-4x across these, so per-100g values are not
   # interchangeable. Modelling them as one ingredient is a common and large error.
-  - {key: coconut_fresh,    en: "Coconut, fresh, grated",   group: nut, ifct_code: G003, density: 0.450}
-  - {key: coconut_dry,      en: "Coconut, dry (copra)",     group: nut, ifct_code: G004, density: 0.500}
-  - {key: coconut_milk_1,   en: "Coconut milk, first extract", group: nut, ifct_code: G005, density: 1.000}
+  - {key: coconut_fresh,    en: "Coconut, fresh, grated",   group: nut, ifct_code: H007, density: 0.450}
+  - {key: coconut_dry,      en: "Coconut, dry (copra)",     group: nut, ifct_code: H006, density: 0.500}
+  - {key: coconut_milk_1,   en: "Coconut milk, first extract", group: nut, density: 1.000}
   - {key: coconut_milk_2,   en: "Coconut milk, second extract", group: nut, density: 1.010}
 
   # ── fats ──────────────────────────────────────────────────────────────────
-  - {key: gingelly_oil,     en: "Gingelly (sesame) oil",    group: fat, ifct_code: V004, density: 0.920}
-  - {key: coconut_oil,      en: "Coconut oil",              group: fat, ifct_code: V002, density: 0.918}
-  - {key: groundnut_oil,    en: "Groundnut oil",            group: fat, ifct_code: V007, density: 0.914}
-  - {key: sunflower_oil,    en: "Sunflower oil",            group: fat, ifct_code: V010, density: 0.918}
-  - {key: ghee,             en: "Ghee, cow",                group: fat, ifct_code: V009, density: 0.911}
+  - {key: gingelly_oil,     en: "Gingelly (sesame) oil",    group: fat, ifct_code: T004, density: 0.920}
+  - {key: coconut_oil,      en: "Coconut oil",              group: fat, ifct_code: T001, density: 0.918}
+  - {key: groundnut_oil,    en: "Groundnut oil",            group: fat, ifct_code: T005, density: 0.914}
+  - {key: sunflower_oil,    en: "Sunflower oil",            group: fat, ifct_code: T012, density: 0.918}
+  - {key: ghee,             en: "Ghee, cow",                group: fat, ifct_code: T013, density: 0.911}
 
   # ── dairy ─────────────────────────────────────────────────────────────────
-  - {key: curd,             en: "Curd, cow milk",           group: dairy, ifct_code: L004, density: 1.030}
+  - {key: curd,             en: "Curd, cow milk",           group: dairy, density: 1.030}
   - {key: milk_cow,         en: "Milk, cow",                group: dairy, ifct_code: L002, density: 1.030}
 
   # ── spices, condiments, sweeteners ────────────────────────────────────────
   - {key: salt,             en: "Salt, iodised",            group: condiment, density: 1.200}
-  - {key: tamarind,         en: "Tamarind pulp",            group: condiment, ifct_code: E017, density: 1.100}
-  - {key: jaggery,          en: "Jaggery, cane",            group: sugar, ifct_code: U002, density: 1.400}
-  - {key: sugar,            en: "Sugar, refined",           group: sugar, ifct_code: U001, density: 0.850}
-  - {key: mustard_seed,     en: "Mustard seeds",            group: spice, ifct_code: S016, density: 0.700}
-  - {key: cumin_seed,       en: "Cumin seeds",              group: spice, ifct_code: S007, density: 0.550}
-  - {key: fenugreek_seed,   en: "Fenugreek seeds",          group: spice, ifct_code: S018, density: 0.780}
-  - {key: black_pepper,     en: "Black pepper",             group: spice, ifct_code: S015, density: 0.550}
-  - {key: red_chilli_dry,   en: "Chilli, red, dry",         group: spice, ifct_code: S008, density: 0.400}
-  - {key: coriander_seed,   en: "Coriander seeds",          group: spice, ifct_code: S006, density: 0.450}
-  - {key: turmeric,         en: "Turmeric powder",          group: spice, ifct_code: S021, density: 0.750}
-  - {key: asafoetida,       en: "Asafoetida",               group: spice, ifct_code: S001, density: 0.700}
-  - {key: cashew,           en: "Cashew nut",               group: nut, ifct_code: G002, density: 0.600}
-  - {key: cardamom,         en: "Cardamom, green",          group: spice, ifct_code: S004, density: 0.400}
+  - {key: tamarind,         en: "Tamarind pulp",            group: condiment, ifct_code: E064, density: 1.100}
+  - {key: jaggery,          en: "Jaggery, cane",            group: sugar, ifct_code: I001, density: 1.400}
+  - {key: sugar,            en: "Sugar, refined",           group: sugar, density: 0.850}
+  - {key: mustard_seed,     en: "Mustard seeds",            group: spice, ifct_code: H013, density: 0.700}
+  - {key: cumin_seed,       en: "Cumin seeds",              group: spice, ifct_code: G025, density: 0.550}
+  - {key: fenugreek_seed,   en: "Fenugreek seeds",          group: spice, ifct_code: G026, density: 0.780}
+  - {key: black_pepper,     en: "Black pepper",             group: spice, ifct_code: G031, density: 0.550}
+  - {key: red_chilli_dry,   en: "Chilli, red, dry",         group: spice, ifct_code: G022, density: 0.400}
+  - {key: coriander_seed,   en: "Coriander seeds",          group: spice, ifct_code: G024, density: 0.450}
+  - {key: turmeric,         en: "Turmeric powder",          group: spice, ifct_code: G033, density: 0.750}
+  - {key: asafoetida,       en: "Asafoetida",               group: spice, ifct_code: G019, density: 0.700}
+  - {key: cashew,           en: "Cashew nut",               group: nut, ifct_code: H005, density: 0.600}
+  - {key: cardamom,         en: "Cardamom, green",          group: spice, ifct_code: G020, density: 0.400}

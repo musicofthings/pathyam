@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .audit import audit as run_audit
 from .lexicon import load_lexicon_file, load_lexicon_into_postgres
+from .ifct2017 import load_ifct_into_postgres
 from .loader import load_into_postgres
 from .schema import load_library
 
@@ -89,6 +90,29 @@ def cmd_load(args) -> int:
     return 0
 
 
+def cmd_ifct(args) -> int:
+    """Ingest the real ICMR-NIN IFCT 2017 tables."""
+    import psycopg
+
+    csv_path = Path(args.csv)
+    if not csv_path.exists():
+        raise SystemExit(
+            f"{csv_path} not found — run `python3 scripts/fetch_ifct.py` first.\n"
+            "The IFCT tables are ICMR-NIN copyright and are fetched, not vendored."
+        )
+
+    with psycopg.connect(args.dsn) as conn:
+        result = load_ifct_into_postgres(csv_path, conn, dry_run=args.dry_run)
+
+    print(json.dumps(result.as_dict(), indent=2))
+    if args.dry_run:
+        print("\n(dry run — rolled back)")
+    else:
+        print("\n  Values loaded under source IFCT2017, is_commercial_cleared = false.")
+        print("  They will appear in ref.v_uncleared_values until ICMR-NIN permission lands.")
+    return 0
+
+
 def cmd_audit(args) -> int:
     import psycopg
 
@@ -164,6 +188,13 @@ def main(argv: list[str] | None = None) -> int:
         help="dish lexicon YAML; loaded into ref.food_name alongside the templates")
     l.set_defaults(func=cmd_load)
 
+    i = sub.add_parser("ifct", help="ingest ICMR-NIN IFCT 2017 composition tables")
+    i.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
+    i.add_argument("--csv", default=str(
+        Path(__file__).resolve().parents[2] / ".ifctdata" / "compositions.csv"))
+    i.add_argument("--dry-run", action="store_true")
+    i.set_defaults(func=cmd_ifct)
+
     a = sub.add_parser("audit", help="report computable templates and the ingredient worklist")
     a.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
     a.add_argument("--samples", type=int, default=800)
@@ -172,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=cmd_audit)
 
     args = parser.parse_args(argv)
-    if args.command in {"load", "audit"} and not args.dsn:
+    if args.command in {"load", "audit", "ifct"} and not args.dsn:
         parser.error("no DSN: pass --dsn or set PATHYAM_DSN")
     return args.func(args)
 

@@ -245,13 +245,14 @@ class PostgresRepository(Repository):
         with self._conn.cursor() as cur:
             cur.execute(
                 """SELECT food_id, canonical_name_en, food_group, pathyam_id,
-                          density_g_per_ml
+                          density_g_per_ml, ifct_code
                      FROM ref.food_item WHERE food_id = ANY(%s)""",
                 (list(food_ids),),
             )
             return {
                 r[0]: {"name": r[1], "food_group": r[2], "pathyam_id": r[3],
-                       "density_g_per_ml": float(r[4]) if r[4] is not None else None}
+                       "density_g_per_ml": float(r[4]) if r[4] is not None else None,
+                       "ifct_code": r[5]}
                 for r in cur.fetchall()
             }
 

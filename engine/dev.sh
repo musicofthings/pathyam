@@ -85,6 +85,12 @@ DSN="$(cat .devdata/dsn)"
 export PATHYAM_DSN="$DSN"
 export PYTHONPATH=.
 
+step "fetching IFCT 2017 composition tables"
+"$PY" scripts/fetch_ifct.py
+
+step "ingesting IFCT 2017 composition (528 foods)"
+"$PY" -m pathyam_engine.authoring ifct
+
 step "loading recipe templates"
 "$PY" -m pathyam_engine.authoring --dir ../db/templates validate
 "$PY" -m pathyam_engine.authoring --dir ../db/templates load >/dev/null

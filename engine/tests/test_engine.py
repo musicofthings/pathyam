@@ -273,3 +273,118 @@ def test_missing_composition_warns_but_does_not_crash(repo):
     r = ComputeEngine(repo).compute("PY-T-000900", n_samples=50)
     assert any("no composition data" in w for w in r.warnings)
     assert r.nutrients == {}
+
+
+# ------------------------------------------------------------ water balance ----
+#
+# The yield factor changes a dish's mass. That mass difference is water: idli
+# batter gains it while steaming, a dosa loses it on the griddle. Every other
+# nutrient is correctly diluted by dividing the raw total by the cooked mass, but
+# water's absolute amount changes too -- and carrying the raw figure through left
+# idli reporting 3.4 g water per 100 g against a real value near 68 g, with the
+# proximates summing to 35 g instead of 100 g.
+#
+# This was invisible until real IFCT composition landed, because there were no
+# WATER values to sum. These tests keep it visible.
+
+
+def _water_repo(yield_factor: float, water_g: float = 10.09):
+    """One food, one ingredient, WATER + ASH present, a chosen yield factor."""
+    from pathyam_engine.models import (
+        CompositionValue, Nutrient, RecipeTemplate, TemplateIngredient,
+        TemplateParameter,
+    )
+    from pathyam_engine.repository import InMemoryRepository
+
+    nutrients = [
+        Nutrient(1, "ENERC_KCAL", "Energy", "kcal", 0, "proximate", True),
+        Nutrient(2, "PROCNT", "Protein", "g", 1, "proximate", True),
+        Nutrient(3, "FAT", "Total fat", "g", 1, "lipid", True),
+        Nutrient(4, "CHOAVLDF", "Available carbohydrate", "g", 1, "carbohydrate", True),
+        Nutrient(5, "FIBTG", "Total dietary fibre", "g", 1, "carbohydrate", True),
+        Nutrient(6, "WATER", "Moisture", "g", 1, "proximate", False),
+        Nutrient(7, "ASH", "Ash", "g", 1, "proximate", False),
+    ]
+    # Rice, raw milled: proximates close to 100 g per 100 g, as IFCT reports them.
+    # Proximates are scaled so they always close to 100 g with the chosen water.
+    solids = 100.0 - water_g
+    rows = [(1, 351.6), (2, 7.81 / 89.91 * solids), (3, 0.55 / 89.91 * solids),
+            (4, 77.16 / 89.91 * solids), (5, 3.74 / 89.91 * solids),
+            (6, water_g), (7, 0.65 / 89.91 * solids)]
+    composition = {
+        1: [CompositionValue(food_id=1, nutrient_id=nid, value=val, sd=0.0,
+                             confidence="A", source_key="IFCT2017")
+            for nid, val in rows]
+    }
+    template = RecipeTemplate(
+        template_id=1, pathyam_id="PY-T-000900", food_id=2, base_method="steamed",
+        parameters=[TemplateParameter("grain_g", "continuous", "point", {"value": 100.0}, "g")],
+        ingredients=[TemplateIngredient(qty_expr="grain_g", food_id=1, unit="g",
+                                        cooking_method="steamed")],
+        default_servings=1.0, yield_factor=yield_factor,
+    )
+    return InMemoryRepository(
+        templates=[template],
+        nutrients=nutrients,
+        composition=composition,
+        food_meta={1: {"name": "Rice, raw, milled", "food_group": "cereal"},
+                   2: {"name": "Test dish", "food_group": "prepared_dish"}},
+    )
+
+
+def _proximate_sum(result) -> float:
+    total = 0.0
+    for tag in ("WATER", "PROCNT", "FAT", "CHOAVLDF", "FIBTG", "ASH"):
+        nutrient = result.nutrients.get(tag)
+        if nutrient is not None:
+            total += nutrient.per_100g.p50
+    return total
+
+
+def test_water_is_gained_when_cooking_increases_mass():
+    """A steamed dish absorbs water; the proximates must still close to ~100 g."""
+    # 100 g of grain -> 283 g steamed, the idli batter ratio measured from real data.
+    result = ComputeEngine(_water_repo(2.83)).compute(
+        "PY-T-000900", n_samples=200, sample_composition_sd=False,
+    )
+    assert result.cooked_mass_g.p50 > result.raw_mass_g.p50
+
+    water = result.nutrients["WATER"].per_100g.p50
+    # Raw grain is 10 g water/100 g; after absorbing 183 g the dish is mostly water.
+    assert water > 60.0, f"steamed dish reported only {water:.1f} g water/100 g"
+    assert _proximate_sum(result) == pytest.approx(100.0, abs=3.0)
+
+
+def test_water_is_lost_when_cooking_reduces_mass():
+    """A griddled batter drives water off; proximates still close to 100 g."""
+    # A wet batter (70 g water/100 g), griddled to 82% of its mass. Losing 18 g of
+    # water from a food holding 70 g is physically possible, unlike doing it to dry
+    # grain -- which is the case the warning below covers.
+    result = ComputeEngine(_water_repo(0.82, water_g=70.0)).compute(
+        "PY-T-000900", n_samples=200, sample_composition_sd=False,
+    )
+    assert result.cooked_mass_g.p50 < result.raw_mass_g.p50
+
+    water = result.nutrients["WATER"].per_100g.p50
+    assert water == pytest.approx((70.0 - 18.0) / 82.0 * 100.0, abs=1.0)
+    assert _proximate_sum(result) == pytest.approx(100.0, abs=3.0)
+
+
+def test_a_yield_that_removes_more_water_than_exists_warns_instead_of_going_negative():
+    """Dry grain cannot lose 18 g of water. Clamp at zero AND say the yield is wrong."""
+    result = ComputeEngine(_water_repo(0.82)).compute(
+        "PY-T-000900", n_samples=200, sample_composition_sd=False,
+    )
+    assert result.nutrients["WATER"].per_100g.p50 == 0.0
+    assert any("more water than the ingredients contain" in w for w in result.warnings), (
+        f"expected a yield/composition disagreement warning, got {result.warnings}"
+    )
+
+
+def test_water_never_goes_negative_under_an_extreme_reduction():
+    """Losing more mass than the food had water must clamp at zero, not go negative."""
+    result = ComputeEngine(_water_repo(0.05)).compute(
+        "PY-T-000900", n_samples=200, sample_composition_sd=False,
+    )
+    water = result.nutrients["WATER"].per_100g.p50
+    assert 0.0 <= water <= 100.0

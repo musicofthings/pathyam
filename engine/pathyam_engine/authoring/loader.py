@@ -87,11 +87,23 @@ def load_into_postgres(
 
         # ---- ingredients (identity only) ---------------------------------
         for key, ing in sorted(library.ingredients.items()):
-            cur.execute(
-                "SELECT food_id FROM ref.food_item WHERE canonical_name_en = %s",
-                (ing.en,),
-            )
-            row = cur.fetchone()
+            # Match on the IFCT code first. It is the stable join to the composition
+            # table loaded by ifct2017.py, and the authored English name deliberately
+            # differs from IFCT's ("Black pepper" vs "Pepper, black"), so matching on
+            # name alone creates a duplicate food that has no composition attached.
+            row = None
+            if ing.ifct_code:
+                cur.execute(
+                    "SELECT food_id FROM ref.food_item WHERE ifct_code = %s",
+                    (ing.ifct_code,),
+                )
+                row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "SELECT food_id FROM ref.food_item WHERE canonical_name_en = %s",
+                    (ing.en,),
+                )
+                row = cur.fetchone()
             if row:
                 food_ids[key] = row[0]
                 cur.execute(
