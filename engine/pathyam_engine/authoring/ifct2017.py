@@ -284,6 +284,29 @@ _SOURCE_CITATION = (
 )
 
 
+def _supersede_open_rows(cur, food_id: int, nutrient_id: int, basis: str = "per_100g") -> None:
+    """Close out any composition row for this food/nutrient carried from an earlier day.
+
+    ``composition_unique_ck`` is UNIQUE (food_id, nutrient_id, basis, valid_from) and
+    ``valid_from`` defaults to ``current_date``, so an ON CONFLICT upsert only matches
+    rows written the SAME day. Re-running a loader the next day therefore inserted a
+    second live row beside the first instead of updating it, and because the engine
+    sums every row with ``valid_to IS NULL`` the nutrient silently doubled -- puttu
+    went from 272 to 471 kcal/100 g overnight with no code change.
+
+    The schema is a temporal one and already means for this to be handled by closing
+    the old row rather than deleting it, so history stays intact and the read path
+    (``valid_to IS NULL``) picks up exactly one value.
+    """
+    cur.execute(
+        """UPDATE ref.composition_value
+              SET valid_to = current_date
+            WHERE food_id = %s AND nutrient_id = %s AND basis = %s
+              AND valid_to IS NULL AND valid_from < current_date""",
+        (food_id, nutrient_id, basis),
+    )
+
+
 def _next_pathyam_food_id(cur) -> int:
     cur.execute(
         r"""SELECT coalesce(max((substring(pathyam_id from 6))::int), 0) + 1
@@ -407,6 +430,7 @@ def load_ifct_into_postgres(
                     "calculated (Atwater 4/9/4/2 from reported macronutrients)"
                     if is_derived else None
                 )
+                _supersede_open_rows(cur, food_id, nutrient_ids[tag])
                 cur.execute(
                     """INSERT INTO ref.composition_value
                            (food_id, nutrient_id, value, basis, sd, n_samples,

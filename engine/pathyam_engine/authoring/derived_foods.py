@@ -18,15 +18,13 @@ DEFINITIONAL -- fixed by chemistry, not by analysis.
     follows from stoichiometry and is not a measurement of a sample. Tier B, with
     the derivation written into ``analytical_method`` so it can be checked.
 
-NOT FILLED HERE
----------------
-Coconut milk, first and second extract. These are preparations, not foods: their
-composition depends on the kernel-to-water ratio and extraction, and picking a
-ratio would be inventing the number this module exists to avoid. The project's own
-documented source fallback (dossier §1) is IFCT 2017 -> IFCT 2004 -> UK CoFID 2021
--> USDA FoodData Central, and USDA FDC carries coconut milk as US Government work in
-the public domain. That is the correct next source, not a guess here. Until then the
-appam template stays blocked, which is the honest state.
+SOURCED -- from a second table, where IFCT is silent.
+    The dossier's documented fallback order is IFCT 2017 -> IFCT 2004 -> UK CoFID
+    2021 -> USDA FoodData Central. Where a food genuinely exists in USDA, its
+    values are transcribed with the FDC id recorded, so anyone can re-check them
+    against the public API. USDA FDC is US Government work in the public domain,
+    so unlike IFCT its source row is commercially cleared.
+    Tier B: SR Legacy is a compiled legacy dataset, not a fresh Foundation analysis.
 """
 
 from __future__ import annotations
@@ -34,7 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["BORROWED_FOODS", "DEFINITIONAL_FOODS", "load_derived_foods", "DerivedLoadResult"]
+__all__ = ["BORROWED_FOODS", "DEFINITIONAL_FOODS", "USDA_FOODS",
+           "load_derived_foods", "DerivedLoadResult"]
 
 
 @dataclass(frozen=True)
@@ -120,13 +119,73 @@ DEFINITIONAL_FOODS = [
 ]
 
 
+@dataclass(frozen=True)
+class USDAFood:
+    """A food taken from USDA FoodData Central, where IFCT 2017 has no entry."""
+
+    name: str                 # canonical_name_en as authored in ingredients.yaml
+    fdc_id: int
+    fdc_description: str
+    rationale: str
+    values: dict[str, float]  # tagname -> value in ref.nutrient's unit
+
+
+# Retrieved from the FDC API on 2026-09-08; re-checkable at
+#     https://api.nal.usda.gov/fdc/v1/food/<fdc_id>?api_key=<key>
+#
+# The mapping to South Indian first/second extract is exact rather than approximate,
+# which is why these two rows are usable and a guessed dilution ratio was not:
+# USDA distinguishes cream (pressed from grated meat, no water added) from milk
+# (pressed from grated meat AND water), and that is precisely the difference between
+# the first and second extract in a Kerala kitchen.
+#
+# Proximates check out on both: cream 53.9+3.63+34.7+6.65+1.15 = 100.03,
+# milk 67.6+2.29+23.8+5.54+0.72 = 99.95.
+USDA_FOODS = [
+    USDAFood(
+        name="Coconut milk, first extract",
+        fdc_id=170580,
+        fdc_description="Nuts, coconut cream, raw (liquid expressed from grated meat)",
+        rationale=(
+            "First extract is grated coconut pressed without added water, which is "
+            "what USDA calls coconut cream. IFCT 2017 has no entry for either extract."
+        ),
+        values={
+            "ENERC_KCAL": 330.0, "PROCNT": 3.63, "FAT": 34.7, "CHOAVLDF": 6.65,
+            "FIBTG": 2.2, "WATER": 53.9, "ASH": 1.15, "FASAT": 30.8,
+            "NA": 4.0, "K": 325.0, "CA": 11.0, "FE": 2.28, "MG": 28.0,
+            "P": 122.0, "ZN": 0.96,
+        },
+    ),
+    USDAFood(
+        name="Coconut milk, second extract",
+        fdc_id=170172,
+        fdc_description=(
+            "Nuts, coconut milk, raw (liquid expressed from grated meat and water)"
+        ),
+        rationale=(
+            "Second extract is the same grated coconut re-pressed with water, which "
+            "is what USDA calls coconut milk. IFCT 2017 has no entry for either."
+        ),
+        values={
+            "ENERC_KCAL": 230.0, "PROCNT": 2.29, "FAT": 23.8, "CHOAVLDF": 5.54,
+            "FIBTG": 2.2, "WATER": 67.6, "ASH": 0.72, "FASAT": 21.1,
+            "NA": 15.0, "K": 263.0, "CA": 16.0, "FE": 1.64, "MG": 37.0,
+            "P": 100.0, "ZN": 0.67,
+        },
+    ),
+]
+
+
 _SOURCE_KEY = "PATHYAM-DERIVED"
+_USDA_SOURCE_KEY = "USDA-FDC"
 
 
 @dataclass
 class DerivedLoadResult:
     borrowed_values: int = 0
     definitional_values: int = 0
+    usda_values: int = 0
     foods_touched: int = 0
     skipped: list[str] = field(default_factory=list)
 
@@ -134,9 +193,33 @@ class DerivedLoadResult:
         return {
             "borrowed_values": self.borrowed_values,
             "definitional_values": self.definitional_values,
+            "usda_values": self.usda_values,
             "foods_touched": self.foods_touched,
             "skipped": self.skipped,
         }
+
+
+def _supersede_open_rows(cur, food_id: int, nutrient_id: int, basis: str = "per_100g") -> None:
+    """Close out any composition row for this food/nutrient carried from an earlier day.
+
+    ``composition_unique_ck`` is UNIQUE (food_id, nutrient_id, basis, valid_from) and
+    ``valid_from`` defaults to ``current_date``, so an ON CONFLICT upsert only matches
+    rows written the SAME day. Re-running a loader the next day therefore inserted a
+    second live row beside the first instead of updating it, and because the engine
+    sums every row with ``valid_to IS NULL`` the nutrient silently doubled -- puttu
+    went from 272 to 471 kcal/100 g overnight with no code change.
+
+    The schema is a temporal one and already means for this to be handled by closing
+    the old row rather than deleting it, so history stays intact and the read path
+    (``valid_to IS NULL``) picks up exactly one value.
+    """
+    cur.execute(
+        """UPDATE ref.composition_value
+              SET valid_to = current_date
+            WHERE food_id = %s AND nutrient_id = %s AND basis = %s
+              AND valid_to IS NULL AND valid_from < current_date""",
+        (food_id, nutrient_id, basis),
+    )
 
 
 def _food_id_by_name(cur, name: str) -> int | None:
@@ -212,6 +295,7 @@ def load_derived_foods(conn, *, dry_run: bool = False) -> DerivedLoadResult:
                 if nid is None:
                     continue
                 scaled = float(value) * spec.scale.get(tag, 1.0)
+                _supersede_open_rows(cur, target, nid)
                 cur.execute(
                     """INSERT INTO ref.composition_value
                            (food_id, nutrient_id, value, basis, sd, confidence,
@@ -250,6 +334,7 @@ def load_derived_foods(conn, *, dry_run: bool = False) -> DerivedLoadResult:
                 nid = nutrient_ids.get(tag)
                 if nid is None:
                     continue
+                _supersede_open_rows(cur, target, nid)
                 cur.execute(
                     """INSERT INTO ref.composition_value
                            (food_id, nutrient_id, value, basis, sd, confidence,
@@ -270,6 +355,67 @@ def load_derived_foods(conn, *, dry_run: bool = False) -> DerivedLoadResult:
                 )
                 result.definitional_values += 1
             result.foods_touched += 1
+
+        # ---- USDA FoodData Central -----------------------------------------
+        if USDA_FOODS:
+            cur.execute(
+                """INSERT INTO ref.source
+                       (source_key, citation, doi_or_url, licence,
+                        is_commercial_cleared, notes)
+                   VALUES (%s, %s, %s, %s, true, %s)
+                   ON CONFLICT (source_key) DO UPDATE
+                       SET citation = EXCLUDED.citation, notes = EXCLUDED.notes
+                   RETURNING source_id""",
+                (
+                    _USDA_SOURCE_KEY,
+                    "U.S. Department of Agriculture, Agricultural Research Service. "
+                    "FoodData Central, SR Legacy.",
+                    "https://fdc.nal.usda.gov/",
+                    "US Government work, public domain",
+                    "Used where IFCT 2017 has no entry, per the documented source "
+                    "fallback order. Public domain, so unlike IFCT2017 this source is "
+                    "commercially cleared and does not appear in v_uncleared_values.",
+                ),
+            )
+            usda_source_id = cur.fetchone()[0]
+
+            for usda in USDA_FOODS:
+                target = _food_id_by_name(cur, usda.name)
+                if target is None:
+                    result.skipped.append(f"{usda.name}: food row absent")
+                    continue
+
+                cur.execute(
+                    "UPDATE ref.food_item SET usda_fdc_id = %s, updated_at = now() "
+                    "WHERE food_id = %s",
+                    (usda.fdc_id, target),
+                )
+                for tag, value in usda.values.items():
+                    nid = nutrient_ids.get(tag)
+                    if nid is None:
+                        continue
+                    _supersede_open_rows(cur, target, nid)
+                    cur.execute(
+                        """INSERT INTO ref.composition_value
+                               (food_id, nutrient_id, value, basis, confidence,
+                                source_id, analytical_method, is_borrowed, notes)
+                           VALUES (%s, %s, %s, 'per_100g', 'B', %s, %s, false, %s)
+                           ON CONFLICT (food_id, nutrient_id, basis, valid_from)
+                           DO UPDATE
+                               SET value = EXCLUDED.value,
+                                   sd = NULL,
+                                   confidence = EXCLUDED.confidence,
+                                   source_id = EXCLUDED.source_id,
+                                   analytical_method = EXCLUDED.analytical_method,
+                                   is_borrowed = false,
+                                   borrowed_from_food_id = NULL,
+                                   notes = EXCLUDED.notes""",
+                        (target, nid, round(value, 5), usda_source_id,
+                         f"USDA FDC {usda.fdc_id} ({usda.fdc_description})",
+                         usda.rationale),
+                    )
+                    result.usda_values += 1
+                result.foods_touched += 1
 
     if dry_run:
         conn.rollback()

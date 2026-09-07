@@ -20,8 +20,8 @@ The compute core is real and tested. Several surrounding features are scaffoldin
 | **Dish resolution** | Indic phonetic folding across Tamil, Kannada, Telugu, Malayalam and Hindi, modifier parsing (*konjam*, *swalpa*, *rendu*), pg_trgm reranking. Measured below. |
 | **Resolution eval harness** | 145 hand-written golden queries including deliberate abstain and absent cases, held-out ablation, abstention calibration. `pathyam_engine/evaluation/harness.py` |
 | **Recipe compiler** | State machine over authored templates: DRAFT → RESOLUTION_REQUIRED / MISSING_COMPOSITION / MISSING_QUANTITY / QC_FAILED → COMPUTABLE → VALIDATED. `pathyam_engine/compiler.py` |
-| **IFCT 2017 composition** | The published ICMR-NIN table: 542 foods, real IFCT codes, 19,999 analytical values with per-value standard errors, 1,341 native-language names (ta/te/ml/kn). Fetched by `scripts/fetch_ifct.py`, ingested by `authoring/ifct2017.py`. **16 of 17 templates compute (94%).** |
-| **Derived composition** | Foods IFCT has no row for: borrowed from a parent food (tier C, `is_borrowed`) or fixed by chemistry (tier B, derivation recorded). `authoring/derived_foods.py` |
+| **IFCT 2017 composition** | The published ICMR-NIN table: 542 foods, real IFCT codes, 19,999 analytical values with per-value standard errors, 1,341 native-language names (ta/te/ml/kn). Fetched by `scripts/fetch_ifct.py`, ingested by `authoring/ifct2017.py`. **All 17 templates compute (100%).** |
+| **Derived composition** | Foods IFCT has no row for, by three stated mechanisms: borrowed from a parent food (tier C, `is_borrowed`), fixed by chemistry (tier B), or sourced from USDA FoodData Central with the FDC id recorded (tier B, public domain). **All 17 templates now compute — 100% coverage.** `authoring/derived_foods.py` |
 | **Meal journal** | Persisted to `app.meal_log` / `app.meal_log_item`, per user, soft-deleted. Survives restart. |
 | **REST API** | `/v1/resolve`, `/v1/compute`, `/v1/log`, `/v1/history`, `/v1/templates`, `/v1/news/rss`, `/v1/evidence/explain`. |
 | **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
@@ -39,7 +39,6 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 | **Meal photo vision — unverified end to end** | The provider now fails loudly instead of faking, but no live call has been made from this repo: there is no API key here, so `PATHYAM_VISION_MODEL` has never been exercised against a real model. Set a key and a model id you have confirmed with `client.models.list()`, then verify before trusting it. | Phase 4 |
 | **Portion accuracy is unmeasured** | No golden meal dataset exists, so portion MAPE and nutrient error are unknown. Vision output must not be presented as accurate until ≥50 photographed meals with weighed component masses are collected. | Phase 4 |
 | **Authentication** | There is none. `X-Pathyam-User` is an unverified, self-asserted header — it makes the persistence layer genuinely per-user, but it is not a credential and anyone who can reach the API can claim any user. | Phase 6 |
-| **Appam template** | Blocked on coconut milk first/second extract, which IFCT 2017 does not carry. These are preparations whose composition depends on the kernel-to-water ratio; picking one would be inventing the number. Next source is USDA FoodData Central (public domain), per the dossier's documented fallback order. | Phase 2 |
 | **Evidence retrieval is a keyword matcher** | One arm: term overlap over a 3-document in-memory corpus. No BM25, no Postgres FTS, no pgvector — the module now says so rather than claiming otherwise. Making it real needs the corpus in Postgres and an embedding provider this repo has no credentials for. | Phase 5 |
 | **Evidence corpus is 3 documents** | Enough to exercise the pipeline, not enough to answer clinical questions. | Phase 5 |
 | **CGT curve is illustrative, not predictive** | Relabelled rather than sourced: the coefficients could not be cited because they are not published values. Glycemic load is standard; the fat and fibre adjustments are directionally supported but their magnitudes are tuning. Every response carries `is_validated: false` and a disclaimer, and the UI renders it. Making it real needs paired CGM traces and weighed meal records. | Phase 6 |
@@ -95,7 +94,7 @@ flowchart TD
         C2["Monte Carlo + sensitivity attribution"]:::done
         C3["FAO/INFOODS QC gates"]:::done
         C4["IFCT 2017 composition — 542 foods in Postgres"]:::done
-        C5["Coconut milk extracts (USDA fallback)"]:::pending
+        C5["USDA FDC — where IFCT is silent"]:::done
         C6["CGT curve<br/>(illustrative, labelled)"]:::partial
     end
 
@@ -114,7 +113,7 @@ flowchart TD
     A3 -.broken.-> B1
     B1 --> B2 --> B3 --> C1 --> C2 --> C3
     C4 --> C2
-    C5 -.not sourced.-> C2
+    C5 --> C2
     C3 --> D1
     C3 --> C6
     D1 --> D2 & D3 & D4 & D5

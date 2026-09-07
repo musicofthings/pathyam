@@ -160,3 +160,73 @@ def test_expression_validation_covers_every_stored_template(conn):
         except Exception as exc:
             problems.append(f"{pathyam_id}: {exc}")
     assert not problems, "invalid quantity expressions:\n" + "\n".join(problems)
+
+
+# ------------------------------------------- composition loader idempotency ----
+
+def test_reloading_composition_on_a_later_day_does_not_double_a_nutrient(conn):
+    """Regression: a loader re-run on a new date used to insert a second live row.
+
+    composition_unique_ck is UNIQUE (food_id, nutrient_id, basis, valid_from) and
+    valid_from defaults to current_date, so ON CONFLICT only matched rows written the
+    same day. The engine sums every row with valid_to IS NULL, so the nutrient
+    silently doubled: puttu went 272 -> 471 kcal/100 g overnight with no code change.
+    Loaders now close the previous row instead of inserting beside it.
+    """
+    from pathyam_engine.authoring.derived_foods import _supersede_open_rows
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT food_id FROM ref.food_item LIMIT 1")
+        food_id = cur.fetchone()[0]
+        cur.execute("SELECT nutrient_id FROM ref.nutrient LIMIT 1")
+        nutrient_id = cur.fetchone()[0]
+
+        # A row as it would have been written on an earlier day.
+        cur.execute(
+            """INSERT INTO ref.composition_value
+                   (food_id, nutrient_id, value, basis, confidence, source_id,
+                    valid_from)
+               SELECT %s, %s, 100, 'per_100g', 'B', min(source_id),
+                      current_date - 1
+                 FROM ref.source
+               ON CONFLICT DO NOTHING""",
+            (food_id, nutrient_id),
+        )
+
+        _supersede_open_rows(cur, food_id, nutrient_id)
+
+        # Today's write lands alongside, but only one row is live.
+        cur.execute(
+            """INSERT INTO ref.composition_value
+                   (food_id, nutrient_id, value, basis, confidence, source_id)
+               SELECT %s, %s, 200, 'per_100g', 'B', min(source_id) FROM ref.source
+               ON CONFLICT (food_id, nutrient_id, basis, valid_from)
+               DO UPDATE SET value = EXCLUDED.value""",
+            (food_id, nutrient_id),
+        )
+
+        cur.execute(
+            """SELECT count(*), max(value) FROM ref.composition_value
+                WHERE food_id = %s AND nutrient_id = %s AND basis = 'per_100g'
+                  AND valid_to IS NULL""",
+            (food_id, nutrient_id),
+        )
+        live, value = cur.fetchone()
+
+    conn.rollback()
+    assert live == 1, "exactly one composition row may be live per food/nutrient/basis"
+    assert float(value) == 200.0, "the live row must be the most recent write"
+
+
+def test_no_food_has_two_live_values_for_the_same_nutrient(conn):
+    """Guards the whole table, not just the path the test above exercises."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT count(*) FROM (
+                   SELECT food_id, nutrient_id, basis
+                     FROM ref.composition_value
+                    WHERE valid_to IS NULL
+                    GROUP BY 1, 2, 3 HAVING count(*) > 1
+               ) duplicated"""
+        )
+        assert cur.fetchone()[0] == 0
