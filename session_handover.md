@@ -1,7 +1,7 @@
 # Session Handover
-_Generated: 2026-09-07T18:24:04Z_
+_Generated: 2026-09-07T18:41:35Z_
 _Branch: phase1/restore-trust_
-_Trigger: usage threshold 89% | Context at compact: n/a_
+_Trigger: usage threshold 95% (286/300 min) | Context at compact: n/a_
 _Compact count this project: 0_
 
 ---
@@ -14,16 +14,38 @@ fabrications, fix the broken schema) is done and pushed. Phase 2 (real data spin
 partly done: the authoritative ICMR-NIN IFCT 2017 table is ingested and a real engine
 bug it exposed is fixed.
 
-**Phase:** Phase 2 — Real data spine (in progress)
-**Next action:** Two items, both explicitly requested by the user:
-(1) persist the meal journal to Postgres, retiring the in-memory `_JOURNAL_STORE` in
-`engine/pathyam_api/main.py` (~line 515) onto `app.meal_log` from
-`db/007_meal_logs_inference.sql`, adding a user identifier;
-(2) supply composition for the 5 ingredients that have no IFCT 2017 entry —
-rice_flour, curd, sugar (refined), coconut_milk_1, coconut_milk_2 — using the
-schema's existing `is_borrowed` + `borrowed_from_food_id` mechanism (tier C, enforced
-by `composition_borrowed_ck`) for borrowed values, and definitional values for sucrose
-and NaCl. That unblocks the last 3 templates (appam, puttu, curd_rice) → 17/17.
+**Phase:** Phase 2 complete (bar appam). Next: Phase 4 (vision) + Phase 5 (evidence).
+**Next action:** The user asked to "keep going with the vision and evidence layers".
+NOTHING HAS BEEN STARTED ON EITHER — the working tree is clean at `c25ecb5`.
+Start with the vision fix, which is small and self-contained:
+
+VISION (`engine/pathyam_engine/vision/gemini_provider.py`) — do these four:
+  1. `model_name` defaults to `"gemini-3.7-flash"`, which is not a real Google model
+     (Gemini 3 uses `gemini-3-*`). Make it read `PATHYAM_VISION_MODEL` from env with a
+     real default, and VERIFY the id against the live model list before choosing one.
+  2. `analyse_meal` swallows every failure via `except Exception: pass` and falls
+     through to `_generate_mock_observation` — a hardcoded dosa+sambar plate at
+     confidence 0.92 that the caller cannot tell from a real reading. Let it raise.
+  3. Gate the mock behind `PATHYAM_MOCK_VISION` ONLY, and tag mock responses in the
+     payload (e.g. `model_version="mock"`) so they are never mistaken for real.
+  4. `_call_gemini_api` is `async` but calls the sync client, blocking the event loop.
+     Use `client.aio.models.generate_content`.
+  Then `/v1/perception/analyze` in main.py (~line 781) ignores the uploaded image
+  entirely, defaults `user_hint` to "masala dosa", and returns a fixed bbox and
+  confidence 0.88 — route it through the real provider or return 501.
+
+EVIDENCE (Phase 5, larger — consider a separate session):
+  - `evidence/citation_validator.py` checks only that an identifier RESOLVES, never
+    that the resolved record matches the claim. Rewrite around title/author/year
+    agreement with a three-state result: VERIFIED / UNVERIFIED (network) /
+    CONTRADICTED (resolves to a different work). Add an adversarial test seeding
+    plausible-but-wrong PMIDs including 31234567 (the one that shipped).
+  - `evidence/hybrid_retrieval.py`: `search_semantic` literally returns
+    `search_lexical`, so RRF fuses two identical rankings. Corpus is 3 hardcoded
+    documents. Implement the two arms against Postgres (FTS + pgvector) or rewrite
+    the docstring to describe the keyword matcher it actually is.
+  - NCBI/Crossref clients need throttling (3 req/s unauthenticated, 10 with
+    NCBI_API_KEY which is already wired).
 
 ---
 
@@ -80,13 +102,34 @@ and NaCl. That unblocks the last 3 templates (appam, puttu, curd_rice) → 17/17
 - [x] Added `tests/test_ifct2017.py` (fixture-based, does not need the licensed CSV)
       and water-balance tests in `tests/test_engine.py`.
 
-**Template coverage: 6% (1/17) → 82% (14/17). Tests: 207 → 278 passing.**
+### Phase 2 second half (commit `c25ecb5`, pushed)
+- [x] `authoring/derived_foods.py` — composition for the 5 foods IFCT has no row for,
+      by two stated mechanisms: BORROWED (rice flour from A015; curd from L002 with
+      carbohydrate scaled 0.75 for fermented lactose) written with `is_borrowed` +
+      `borrowed_from_food_id` so `composition_borrowed_ck` forces tier C; and
+      DEFINITIONAL (sucrose 100 g carb / 400 kcal; NaCl Na = 22.990/58.443 =
+      39.34 g/100 g) at tier B with the derivation in `analytical_method`.
+- [x] Coconut milk 1st/2nd extract deliberately NOT filled — preparations whose
+      composition depends on kernel:water ratio. USDA FDC (public domain) is the
+      documented next source. Appam stays blocked; that is the honest state.
+- [x] `db/013_meal_log_app_fields.sql` — adds `meal_type` (app's 9 values) beside
+      `meal_slot` (clinical 6), seeds the fixed dev user.
+- [x] `engine/pathyam_api/journal.py` + rewired 5 endpoints. `_JOURNAL_STORE` gone.
+      Per-user, soft-deleted, survives restart. Removed a fabricated 300.0 kcal
+      default used whenever a meal computed nothing.
+- [x] Identity via unverified `X-Pathyam-User` header, documented as NOT auth.
+- [x] Fixed 2 bugs found while wiring: portions applied twice (2-idli log read
+      587 kcal vs the engine's 480 — stored unscaled now, regression test added);
+      `adjust_portions` 404'd for a meal whose lines did not resolve.
+
+**Template coverage: 6% (1/17) → 94% (16/17). Tests: 207 → 283 passing.**
+**Confidence profile: 19,933 A / 29 B / 77 C. `ref.v_uncleared_values`: 19,947.**
 
 ---
 
 ## 🔄 In Progress (Exact Resume Point)
 **Branch:** `phase1/restore-trust` (contains both Phase 1 and Phase 2 commits)
-**Last commit:** `b63e480 feat: ingest the real IFCT 2017 tables; conserve water across cooking`
+**Last commit:** `c25ecb5 feat: persist the meal journal; fill composition IFCT does not carry`
 **Working tree:** clean, pushed to origin
 **Next immediate action:** Start the two items under "Active Task → Next action".
 Nothing is half-edited; resume cleanly.
@@ -95,39 +138,25 @@ Nothing is half-edited; resume cleanly.
 
 ## 📋 Remaining Work
 
-### Immediate (user asked for both, this is the current task)
-1. **Persist the meal journal.** `_JOURNAL_STORE` in `engine/pathyam_api/main.py` is a
-   module-level list: history, portion edits and the dashboard are lost on restart and
-   shared across all callers. Target `app.meal_log` in `db/007_meal_logs_inference.sql`.
-   Introduce a user identifier. Endpoints: `/v1/log`, `/v1/history`,
-   `DELETE /v1/history/{id}`, `PATCH /v1/history/{id}/portion`, `/v1/dashboard/summary`.
-2. **The 5 ingredients with no IFCT entry** → unblocks appam, puttu, curd_rice (17/17):
-   - `rice_flour` — borrow from A015 (Rice, raw, milled), tier C, `is_borrowed=true`
-   - `curd` — borrow from L002 (Milk, whole, Cow), tier C
-   - `sugar` — sucrose is definitional (~100 g carbohydrate, ~398 kcal), tier B
-   - `salt` — NaCl stoichiometry: Na = 22.99/58.44 = 39.34 g/100 g, tier B
-   - `coconut_milk_1` / `coconut_milk_2` — extracts; compute from H007 (Coconut,
-     kernel, fresh) + water rather than looking up
-   Note `composition_borrowed_ck` enforces borrowed ⇒ confidence C or D.
+### Immediate — the current task (NOT STARTED)
+1. **Vision** — see "Next action" above for the four concrete changes.
+2. **`/v1/perception/analyze`** — ignores the image; route to real vision or 501.
+3. **Evidence layer** — validator rewrite + real retrieval; see "Next action".
 
-### Then (rest of the "replace all synthetic content" instruction)
-3. **Vision** (`vision/gemini_provider.py`): model id `gemini-3.7-flash` is not a real
-   Google model; failures are swallowed by `except Exception: pass` and fall through to
-   a hardcoded dosa+sambar mock indistinguishable from a real reading. Fail loudly,
-   gate the mock behind `PATHYAM_MOCK_VISION` only, use `client.aio` for async.
-4. **`/v1/perception/analyze`** — ignores the uploaded image, defaults to
-   "masala dosa", returns fixed bbox/confidence 0.88. Route to real vision or 501.
-5. **Evidence corpus** — 3 hardcoded documents; `search_semantic` just calls
-   `search_lexical` so RRF fuses two identical rankings. No pgvector, no FTS.
-6. **Citation validator** — checks identifier existence only, never that the record
-   matches the claim. Needs title/author/year agreement and a three-state
-   VERIFIED / UNVERIFIED / CONTRADICTED result.
-7. **CGT `predict_spike`** — coefficients (1.8, −0.02, −0.04) unsourced. Cite or
-   relabel as an illustrative simulation in API docs and UI.
-8. **`/v1/cgt/telemetry`** — echoes input, stores nothing.
-9. **Phase 3** — romanised resolution is 53.3% top-1 (largest category). The 1,341
-   IFCT native-language names now loaded into `ref.food_name` are a direct lever.
-10. Mobile app: hardcoded `http://localhost:8000`, no lockfile, never built.
+### Then
+4. **CGT `predict_spike`** — coefficients (1.8, −0.02, −0.04) unsourced. Cite or
+   relabel as an illustrative simulation in API docs and UI. `journal.py` has a
+   copy in `_illustrative_peak()` — keep the two in step.
+5. **`/v1/cgt/telemetry`** — echoes input, stores nothing.
+6. **Appam** — needs coconut milk from USDA FoodData Central (public domain).
+7. **Phase 3 (cheap now)** — romanised resolution is 53.3% top-1, the largest and
+   weakest category. The ingest loaded **1,341 IFCT native-language names** into
+   `ref.food_name` (ta/te/ml/kn) — a direct lever that did not exist before.
+8. **Golden meal dataset** — the safety benchmark suite has nothing to measure
+   until ≥50 photographed meals with weighed component masses exist.
+9. Mobile app: hardcoded `http://localhost:8000`, no lockfile, never built.
+10. `_POOL` is a module global; constructing a second `TestClient` re-runs the app
+    lifespan and closes the shared pool. Bit one test this session. Latent fragility.
 
 ---
 
@@ -142,6 +171,11 @@ Nothing is half-edited; resume cleanly.
 | Water is conserved across cooking | Yield changes mass; that mass IS water. Every other nutrient dilutes correctly, water's absolute amount also changes | 2026-09-07 |
 | Delete fabricated data rather than repair it | A claim written first with a citation attached afterwards is the exact failure the evidence layer exists to prevent | 2026-09-07 |
 | `ifct_data.py` demoted to test fixture | Its values are close but not the published ones (rice A014: 351.6/77.16/3.74 vs its 346/74.80/2.81) | 2026-09-07 |
+| Two mechanisms only for non-IFCT foods: borrowed or definitional | Each carries the tier it earns; `composition_borrowed_ck` makes "borrowed" un-fakeable as tier A/B | 2026-09-07 |
+| Coconut milk left unfilled | Its composition depends on kernel:water ratio; choosing one would invent the number. USDA FDC is the documented fallback | 2026-09-07 |
+| `meal_type` added beside `meal_slot`, not merged | 9-value app vocabulary vs 6-value clinical grouping; overloading would lose one or corrupt the other | 2026-09-07 |
+| Identity via unverified header, clearly labelled not-auth | Makes `user_id` and per-user paths real and tested without pretending auth exists | 2026-09-07 |
+| Meal deletes are soft | Deleting must not silently rewrite someone's dietary history | 2026-09-07 |
 
 ---
 
@@ -155,10 +189,10 @@ bash scripts/session_sync.sh --load
 cd engine && ./dev.sh --reset --no-serve
 
 # Verify:
-./run_tests.sh                                    # expect 278 passing
+./run_tests.sh                                    # expect 283 passing
 export PATHYAM_DSN="$(cat engine/.devdata/dsn)"
 cd engine && PYTHONPATH=. python3 -m pathyam_engine.authoring \
-    --dir ../db/templates audit --worklist 10     # expect 14/17, 82%
+    --dir ../db/templates audit --worklist 10     # expect 16/17, 94%
 PYTHONPATH=. python3 -m pathyam_engine.evaluation # resolution eval, top-1 83.3%
 
 # In Claude Code:
@@ -195,7 +229,10 @@ PYTHONPATH=. python3 -m pathyam_engine.evaluation # resolution eval, top-1 83.3%
 | engine/tests/test_api.py | modified (news feed tests) |
 | engine/tests/test_eval_benchmarks.py | modified |
 | engine/tests/test_full_universe.py | DELETED |
-| README.md | rewritten |
+| README.md | rewritten (twice; Known-gaps table is current) |
+| db/013_meal_log_app_fields.sql | added |
+| engine/pathyam_engine/authoring/derived_foods.py | added |
+| engine/pathyam_api/journal.py | added |
 | .env.example | added |
 | .gitignore | modified (.env, .ifctdata/, session state) |
 
@@ -204,17 +241,17 @@ PYTHONPATH=. python3 -m pathyam_engine.evaluation # resolution eval, top-1 83.3%
 ## 🌿 Git Context
 ```
 Branch  : phase1/restore-trust
-Commit  : b63e480 feat: ingest the real IFCT 2017 tables; conserve water across cooking
+Commit  : c25ecb5 feat: persist the meal journal; fill composition IFCT does not carry
 Status  : clean, pushed to origin
 ```
 
 Recent commits:
 ```
+c25ecb5 feat: persist the meal journal; fill composition IFCT does not carry
+9d9cfed docs: session handover for Phase 2 (cross-device resume state)
 b63e480 feat: ingest the real IFCT 2017 tables; conserve water across cooking
 7afa5a1 fix: repair broken schema, remove fabricated data, make docs match code
 16a9c74 feat: Recipe compiler, Gemini 3.7 Flash vision, Evidence engine, 5th layer benchmarks, and full IFCT dataset
-1e940d2 docs: add Google Stitch UI prompts and interactive prototype spec
-612f348 feat: Gen-Z Light Pastel UI, 6 navigation tabs, CGT simulation, Recipe Catalog, RSS News feed, and cross-platform bundling
 ```
 
 ---
