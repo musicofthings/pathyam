@@ -277,38 +277,98 @@ def evaluate(
     # configuration that no longer shipped.
     min_similarity: float | None = None,
 ) -> EvalReport:
-    outcomes: list[QueryOutcome] = []
     extra = {} if min_similarity is None else {"min_similarity": min_similarity}
+    outcomes = [
+        _score_query(resolver, gq, limit=limit, preferred_lang=preferred_lang,
+                     extra=extra)
+        for gq in queries
+    ]
+    return EvalReport(outcomes=outcomes, label=label, lexicon_size=lexicon_size)
+
+
+def _score_query(
+    resolver: DishResolver,
+    gq: GoldenQuery,
+    *,
+    limit: int,
+    preferred_lang: str | None,
+    extra: dict[str, Any],
+) -> QueryOutcome:
+    started = time.perf_counter()
+    items = resolver.resolve_text(gq.q, limit=limit, preferred_lang=preferred_lang,
+                                  **extra)
+    elapsed = (time.perf_counter() - started) * 1000.0
+
+    # Multi-item lines are scored on the first item; the golden set is written
+    # so that the first item is always the one under test.
+    item = items[0] if items else None
+    candidates = item.candidates if item else []
+
+    rank = None
+    for position, candidate in enumerate(candidates, start=1):
+        if candidate.pathyam_id in gq.acceptable:
+            rank = position
+            break
+
+    return QueryOutcome(
+        query=gq,
+        predicted=candidates[0].pathyam_id if candidates else None,
+        rank=rank,
+        confidence=item.confidence if item else 0.0,
+        margin=item.margin if item else 0.0,
+        asked_for_confirmation=item.needs_confirmation if item else True,
+        method=candidates[0].method if candidates else None,
+        latency_ms=elapsed,
+    )
+
+
+def evaluate_leave_one_out(
+    dishes: Sequence[dict[str, Any]],
+    queries: Sequence[GoldenQuery],
+    *,
+    label: str = "leave-one-out",
+    limit: int = 5,
+    preferred_lang: str | None = None,
+    min_similarity: float | None = None,
+) -> EvalReport:
+    """Hold out only the query's OWN alias, leaving the dish's other spellings in.
+
+    The global holdout used by :func:`ablate` removes every golden query string at
+    once. For a well-covered dish that removes all of its spellings simultaneously:
+    ``dosa_plain`` lists nine surface forms and six of them (dosa, dosai, thosai,
+    dose, dosey, dhosa) are golden queries, so the dish is left with no bare name at
+    all while ``dosa_rava`` keeps "ravai dosai" containing the queried token exactly.
+    A one-word query then cannot outrank a two-word sibling however the scoring is
+    tuned, and the failure is an artifact of the ablation rather than something a
+    user would ever hit -- in production "dosai" is a catalogued alias and resolves
+    exactly.
+
+    Leave-one-out models the real case: an unseen spelling of a dish whose *other*
+    spellings are known. It is the number to tune ranking against. The global
+    holdout remains useful as a deliberately harsher floor, so both are reported.
+
+    Canonical and native-script names are never held out, matching
+    :func:`build_source` -- removing those makes a dish unfindable rather than
+    unfamiliar.
+    """
+    from ..resolution.trigram import normalize
+
+    extra = {} if min_similarity is None else {"min_similarity": min_similarity}
+    full = build_source(dishes)
+    outcomes: list[QueryOutcome] = []
 
     for gq in queries:
-        started = time.perf_counter()
-        items = resolver.resolve_text(gq.q, limit=limit, preferred_lang=preferred_lang,
-                                      **extra)
-        elapsed = (time.perf_counter() - started) * 1000.0
+        held = normalize(gq.q)
+        entries = [
+            e for e in full.entries
+            if e.is_primary or normalize(e.surface) != held
+        ]
+        resolver = DishResolver(InMemoryCandidateSource(entries))
+        outcomes.append(_score_query(resolver, gq, limit=limit,
+                                     preferred_lang=preferred_lang, extra=extra))
 
-        # Multi-item lines are scored on the first item; the golden set is written
-        # so that the first item is always the one under test.
-        item = items[0] if items else None
-        candidates = item.candidates if item else []
-
-        rank = None
-        for position, candidate in enumerate(candidates, start=1):
-            if candidate.pathyam_id in gq.acceptable:
-                rank = position
-                break
-
-        outcomes.append(QueryOutcome(
-            query=gq,
-            predicted=candidates[0].pathyam_id if candidates else None,
-            rank=rank,
-            confidence=item.confidence if item else 0.0,
-            margin=item.margin if item else 0.0,
-            asked_for_confirmation=item.needs_confirmation if item else True,
-            method=candidates[0].method if candidates else None,
-            latency_ms=elapsed,
-        ))
-
-    return EvalReport(outcomes=outcomes, label=label, lexicon_size=lexicon_size)
+    return EvalReport(outcomes=outcomes, label=label,
+                      lexicon_size=len(full.entries))
 
 
 def ablate(

@@ -305,3 +305,50 @@ a situation that does not occur: in production `dosai` is a catalogued alias of
 an unseen spelling of a dish whose *other* spellings are known — and would let a
 ranking change be judged on whether it helps users rather than on whether it can
 recover a dish stripped of every bare name it has.
+
+---
+
+## Leave-one-out holdout — implemented
+
+`evaluate_leave_one_out()` removes only the query's **own** alias, leaving the dish's
+other spellings in place. This is now the primary number the CLI reports; the global
+holdout is kept as a deliberately harsher floor and is still what the ablation runs
+against.
+
+| | global holdout | leave-one-out |
+|---|---|---|
+| top-1 | 83.3% | **85.5%** |
+| top-5 | 92.0% | 92.0% |
+| MRR | 0.867 | **0.881** |
+| misspelling | 81.2% | **93.8%** |
+| with_quantity | 92.3% | **100.0%** |
+| romanised | 53.3% | **56.7%** |
+| colloquial | 68.8% | 62.5% |
+| abstention recall on "should ask" | 100% | 100% |
+| silent errors | 3.4% | **1.1%** |
+
+Four of the six dosa-cluster failures are gone — `thosai`, `dhosa`, `dosey` and
+`oru dosai` now resolve, because `dosa_plain` keeps its other bare spellings instead
+of being stripped of all of them at once. `dosai` and `dose` still miss.
+
+Two results worth not glossing over:
+
+**Colloquial got worse** (68.8% → 62.5%). Leave-one-out is not uniformly easier: it
+also leaves *competitors'* aliases in play, and several colloquial queries now lose to
+a sibling dish whose alias the global holdout happened to remove as collateral. That
+is the more realistic contest, and the lower number is the more truthful one.
+
+**Silent errors fell from 3.4% to 1.1%** while abstention recall stayed at 100%. The
+resolver is not just scoring higher, it is wrong-and-confident less often — which
+matters more than top-1 for a system that logs what someone ate.
+
+### What this does and does not license
+
+It does not move the lexeme ceiling. The nine distinct regional lexemes (`huli`,
+`chammanthi`, `chitranna`, …) still fail under leave-one-out, because no ablation
+setting can conjure a word the lexicon never contained. Romanised at 56.7% now sits
+against a 70.0% ceiling — roughly four queries of real headroom.
+
+The coverage-scaled containment change reverted in the previous commit should be
+re-tried **against this number**, not the global one, and re-checked against the
+abstention invariant that rejected it the first time.

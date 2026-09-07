@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 from ..resolution import DishResolver
-from .harness import ablate, build_source, evaluate, load_lexicon, load_queries
+from .harness import (ablate, build_source, evaluate, evaluate_leave_one_out,
+                      load_lexicon, load_queries)
 
 _DEFAULT_DIR = Path(__file__).resolve().parents[2] / "eval"
 
@@ -84,24 +85,34 @@ def main(argv: list[str] | None = None) -> int:
     dishes = load_lexicon(args.lexicon)
     queries = load_queries(args.queries)
 
-    # Two modes, both meaningful:
-    #   catalogued — every tested spelling is in the alias table. This is what
-    #                production looks like once the lexicon is built out.
-    #   held-out   — alias rows matching a golden query are removed, so the resolver
-    #                must generalise to spellings nobody catalogued. This is the
-    #                honest measure, and the only one where ablation says anything.
+    # Three modes:
+    #   catalogued     — every tested spelling is in the alias table. What production
+    #                    looks like once the lexicon is built out.
+    #   leave-one-out  — only the query's OWN alias is removed, so the dish keeps its
+    #                    other spellings. This is the number to tune ranking against:
+    #                    it models a user typing an unseen romanisation of a dish the
+    #                    lexicon already covers.
+    #   global holdout — every golden query string is removed at once. Deliberately
+    #                    harsher, and for a well-covered dish unrealistically so:
+    #                    six of dosa_plain's nine surfaces are golden queries, so it
+    #                    is left with no bare name while siblings keep theirs. Kept
+    #                    as a floor, and it is the mode the ablation runs in.
     full_source = build_source(dishes)
     held_source = build_source(dishes, holdout=[q.q for q in queries])
 
     catalogued = evaluate(DishResolver(full_source), queries,
                           label="catalogued (aliases present)",
                           lexicon_size=len(full_source.entries))
-    report = evaluate(DishResolver(held_source), queries,
-                      label="held-out (unseen spellings)",
-                      lexicon_size=len(held_source.entries))
+    report = evaluate_leave_one_out(dishes, queries,
+                                    label="leave-one-out (unseen spelling, dish known)")
+    global_holdout = evaluate(DishResolver(held_source), queries,
+                              label="global holdout (all spellings removed)",
+                              lexicon_size=len(held_source.entries))
 
     if args.json:
-        payload = {"catalogued": catalogued.as_dict(), "held_out": report.as_dict()}
+        payload = {"catalogued": catalogued.as_dict(),
+                   "leave_one_out": report.as_dict(),
+                   "global_holdout": global_holdout.as_dict()}
         if not args.no_ablation:
             payload["ablations"] = [r.as_dict() for r in ablate(dishes, queries)]
         json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
@@ -110,9 +121,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"  catalogued lexicon: top-1 {_pct(catalogued.top1).strip()}   "
           f"({len(full_source.entries)} entries)")
-    print(f"  held-out lexicon:   top-1 {_pct(report.top1).strip()}   "
-          f"({len(held_source.entries)} entries, "
-          f"{len(full_source.entries) - len(held_source.entries)} aliases removed)")
+    print(f"  global holdout:     top-1 {_pct(global_holdout.top1).strip()}   "
+          f"({len(held_source.entries)} entries, all golden spellings removed)")
+    print(f"  leave-one-out:      top-1 {_pct(report.top1).strip()}   "
+          f"({report.lexicon_size} entries, this query's own spelling removed)")
     print()
     print(_render(report, args.failures))
 

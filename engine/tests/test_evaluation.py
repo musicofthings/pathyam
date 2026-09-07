@@ -179,3 +179,52 @@ def _expected(queries: list[GoldenQuery], text: str) -> str | None:
         if gq.q == text:
             return gq.expect
     return None
+
+
+# ------------------------------------------------------- leave-one-out mode ----
+
+
+def test_leave_one_out_keeps_the_dish_s_other_spellings(dishes, queries):
+    """Global holdout strips every golden spelling at once; this strips only one.
+
+    dosa_plain lists nine surface forms and six of them are golden queries, so the
+    global holdout leaves it with no bare name at all while dosa_rava keeps
+    "ravai dosai". That is an artifact of the ablation, not a case a user hits.
+    """
+    from pathyam_engine.evaluation.harness import evaluate_leave_one_out
+
+    report = evaluate_leave_one_out(dishes, queries)
+
+    # The full lexicon is in play; only one row is dropped per query.
+    assert report.lexicon_size == len(build_source(dishes).entries)
+    assert report.top1 is not None and report.top1 > 0.80
+
+
+def test_leave_one_out_still_holds_out_the_query_itself(dishes, queries):
+    """Guard against the mode silently degrading into a dictionary lookup.
+
+    If the query's own alias survived, every alias-derived query would be an exact
+    match and the number would measure nothing -- the failure the global holdout was
+    introduced to fix in the first place.
+    """
+    from pathyam_engine.evaluation.harness import evaluate_leave_one_out
+
+    from pathyam_engine.evaluation.harness import evaluate
+
+    report = evaluate_leave_one_out(dishes, queries)
+    full = evaluate(DishResolver(build_source(dishes)), queries)
+
+    assert report.top1 < 1.0, "no held-out spelling should resolve exactly"
+    assert report.top1 < full.top1, (
+        "leave-one-out must be strictly harder than the catalogued run; equal scores "
+        "mean the query's own alias survived and this is measuring dictionary lookup"
+    )
+
+
+def test_leave_one_out_preserves_the_abstention_safety_property(dishes, queries):
+    """Every case the golden set marks 'should ask' must still be flagged."""
+    from pathyam_engine.evaluation.harness import evaluate_leave_one_out
+
+    stats = evaluate_leave_one_out(dishes, queries).abstention()
+    assert stats["expected_ask_recall"] == 1.0
+    assert stats["silent_errors"] <= 0.05
