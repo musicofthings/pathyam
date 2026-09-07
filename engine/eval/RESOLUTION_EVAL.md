@@ -158,3 +158,50 @@ full report after:
   harness.
 - **No per-region or per-user-prior evaluation yet.** Both boosts exist in the resolver
   and neither is exercised by the golden set.
+
+---
+
+## The held-out romanised ceiling is 70%, not 100%
+
+Run `PYTHONPATH=. python3 eval/lexeme_ceiling.py` to reproduce.
+
+Held-out evaluation removes a query's own alias and asks the resolver to find the
+dish anyway. That is the right test for a **spelling variant** — "dosai" should reach
+`dosa_plain` via "dosa", "puliyodarai" via "puliyodharai". It is not a meaningful
+test for a **distinct regional lexeme**: "huli" is simply the Kannada word for
+sambar and shares no morphology with any other surface form of that dish. Its nearest
+sibling scores 0.18. No phonetic folding, trigram or edit-distance method derives it,
+because there is nothing to derive it from.
+
+Of the 30 romanised golden queries:
+
+| | count | what it measures |
+|---|---|---|
+| spelling variants | 21 | resolver quality — genuine headroom |
+| distinct lexemes | 9 | lexicon coverage — unreachable when held out |
+
+    huli -> sambar              neychoru -> ghee_rice       chammanthi -> coconut_chutney
+    chitranna -> lemon_rice     thenkuzhal -> murukku       majjiga pulusu -> mor_kuzhambu
+    mosaranna / daddojanam / perugannam -> curd_rice
+
+All nine are already in the lexicon; the ablation is what removes them. Against the
+catalogued lexicon every one resolves, which is why the catalogued score is 100%.
+
+**Consequences.**
+
+1. Romanised held-out is currently 53.3% against a ceiling of 70.0%. The real
+   headroom is about 5 queries, not 14. A target of "romanised ≥ 80% held-out" is
+   unachievable by construction and should not be set.
+2. Report romanised held-out against the 70% ceiling, or report the two classes
+   separately. Quoting 53.3% against an implied 100% overstates how bad the resolver
+   is and points effort at the wrong problem.
+3. The way to serve a user who types "huli" is lexicon coverage, not a better
+   matching algorithm. Every regional name added is free recall — the lexicon file
+   already says `aliases` should grow, not shrink.
+4. **IFCT 2017 does not help here.** The ingest loaded 1,341 native-language names
+   into `ref.food_name`, but IFCT is a table of ingredients and raw foods: it carries
+   "Sorrakaya" (bottle gourd) and "Nuvvulu" (gingelly seeds), not prepared dishes.
+   Zero of the nine lexemes above appear in IFCT-sourced names. Those names are
+   valuable for resolving *ingredient* mentions, which nothing currently covers —
+   but that is a different capability from dish resolution, and it is not what this
+   harness measures.
