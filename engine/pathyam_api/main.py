@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository
@@ -28,7 +29,7 @@ from pathyam_engine.distributions import PriorError
 from pathyam_engine.expressions import ExpressionError
 from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
 from pathyam_engine.vision import GeminiVisionProvider, evaluate_image_quality
-from pathyam_engine.evidence import EvidenceEngine
+from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 
 from . import schemas as s
 
@@ -64,6 +65,37 @@ app = FastAPI(
         "Resolution returns dish identities and scores only — never nutrient values."
     ),
     lifespan=lifespan,
+)
+
+
+# ------------------------------------------------------------------ CORS ----
+#
+# The web UI is served same-origin from /static and needs none of this. The Expo
+# mobile client and any separately-hosted frontend do.
+#
+# Origins come from ALLOWED_ORIGINS (comma-separated). There is deliberately no
+# wildcard fallback: an unset variable in production yields an empty allowlist and
+# cross-origin calls fail loudly, rather than silently opening the API to everyone.
+# See .env.example.
+def _allowed_origins() -> list[str]:
+    configured = os.environ.get("ALLOWED_ORIGINS", "").strip()
+    if configured:
+        return [o.strip() for o in configured.split(",") if o.strip()]
+    if os.environ.get("PATHYAM_ENV", "development") == "development":
+        return [
+            "http://localhost:5173", "http://127.0.0.1:5173",   # Vite
+            "http://localhost:8081", "http://127.0.0.1:8081",   # Expo dev server
+            "http://localhost:8000", "http://127.0.0.1:8000",   # this API
+        ]
+    return []
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
 
@@ -676,45 +708,58 @@ def explain_clinical_evidence(query: str) -> dict[str, Any]:
 
 @app.get("/v1/news/rss", response_model=s.RSSFeedResponse, tags=["news"])
 def get_nutrition_rss_news() -> s.RSSFeedResponse:
-    """Fetch live or aggregated RSS research news on South Indian clinical nutrition & CGT telemetry."""
-    articles = [
-        s.RSSArticle(
-            title="ICMR-NIN IFCT 2017: Precision Nutrient Profiling in South Indian Diets",
-            link="https://www.nin.res.in/",
-            source="ICMR National Institute of Nutrition",
-            published_at="2026-08-14",
-            summary="New clinical evidence reveals significant attenuation of glycemic spikes when combining fermented rice batter with high-fibre pulses and native seeds.",
-            category="Clinical Nutrition"
-        ),
-        s.RSSArticle(
-            title="Continuous Glucose Telemetry: Postprandial Spike Damping via Dietary Fibre & Fat",
-            link="https://pubmed.ncbi.nlm.nih.gov/",
-            source="PubMed Clinical Diabetes Research",
-            published_at="2026-08-13",
-            summary="Continuous interstitial glucose tracking demonstrates an exponential decrease in peak postprandial glucose (Delta G_max) when meals contain >5g dietary fibre and controlled lipid ratios.",
-            category="CGT Telemetry"
-        ),
-        s.RSSArticle(
-            title="Monte Carlo Bayesian Modeling of Cooked Recipe Variance in Asian Cuisine",
-            link="https://arxiv.org/",
-            source="Journal of Computational Nutrition",
-            published_at="2026-08-12",
-            summary="Replacing static single-value database rows with parametric distributions and Monte Carlo sampling reduces 80% credible interval estimation error by up to 64%.",
-            category="Algorithmic AI"
-        ),
-        s.RSSArticle(
-            title="Glycemic Index and Glycemic Load Profiles of Idli, Dosa, and South Indian Breakfast Staple Foods",
-            link="https://www.nature.com/",
-            source="Nature Asian Journal of Clinical Nutrition",
-            published_at="2026-08-10",
-            summary="Comprehensive evaluation of fermentation durations (8-16h) and parboiled rice fractions on postprandial glucose trajectories in type-2 diabetic cohorts.",
-            category="Metabolic Health"
+    """Recent PubMed literature on South Indian diet, glycemic response and CGM.
+
+    Every article returned is a real PubMed record: the title, journal, date and
+    abstract come from E-utilities, and the link resolves to that PMID. If NCBI is
+    unreachable the feed comes back empty -- it does not fall back to canned content.
+    (An earlier version of this endpoint returned four invented articles in two
+    journals that do not exist.)
+    """
+    query = (
+        '("glycemic index"[tiab] OR "glycaemic index"[tiab] OR "glycemic load"[tiab] '
+        'OR "postprandial glucose"[tiab] OR "continuous glucose monitoring"[tiab]) '
+        'AND ("Indian"[tiab] OR "South India"[tiab] OR "idli"[tiab] OR "dosa"[tiab] '
+        'OR "millet"[tiab] OR "pulses"[tiab] OR "dietary fibre"[tiab] OR "dietary fiber"[tiab])'
+    )
+
+    client = NCBIClient()
+    pmids = client.search_pubmed(query, max_results=8, sort="date")
+    summaries = client.fetch_pubmed_summaries(pmids) if pmids else {}
+    abstracts = client.fetch_abstracts(list(summaries)) if summaries else {}
+
+    articles: list[s.RSSArticle] = []
+    for pmid in pmids:
+        doc = summaries.get(pmid)
+        if not doc:
+            continue
+
+        authors = [a.get("name", "") for a in doc.get("authors", []) if a.get("name")]
+        byline = ", ".join(authors[:3]) + (" et al." if len(authors) > 3 else "")
+        journal = doc.get("fulljournalname") or doc.get("source") or "PubMed"
+
+        abstract = abstracts.get(pmid, "")
+        if len(abstract) > 420:
+            abstract = abstract[:417].rsplit(" ", 1)[0] + "..."
+        # No abstract on record: say so rather than inventing a summary.
+        summary = abstract or (f"{byline} — no abstract on record." if byline
+                               else "No abstract on record.")
+
+        articles.append(
+            s.RSSArticle(
+                title=doc.get("title", "").rstrip("."),
+                link=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                source=f"{journal}" + (f" · {byline}" if byline else ""),
+                published_at=doc.get("pubdate", ""),
+                summary=summary,
+                category="PubMed",
+            )
         )
-    ]
+
     return s.RSSFeedResponse(
-        feed_title="Pathyam Clinical Nutrition & CGT Telemetry Research News",
+        feed_title="Recent PubMed research — glycemic response & Indian diets",
         count=len(articles),
-        articles=articles
+        articles=articles,
     )
 
 

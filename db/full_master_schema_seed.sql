@@ -1926,9 +1926,9 @@ SELECT
     t.base_method,
     t.status,
     t.yield_factor,
-    COUNT(DISTINCT ti.ingredient_id) AS total_ingredients,
-    COUNT(DISTINCT CASE WHEN ti.food_id IS NOT NULL THEN ti.ingredient_id END) AS resolved_foods,
-    COUNT(DISTINCT CASE WHEN ti.sub_template_id IS NOT NULL THEN ti.ingredient_id END) AS nested_sub_recipes
+    COUNT(DISTINCT ti.template_ingredient_id) AS total_ingredients,
+    COUNT(DISTINCT CASE WHEN ti.food_id IS NOT NULL THEN ti.template_ingredient_id END) AS resolved_foods,
+    COUNT(DISTINCT CASE WHEN ti.sub_template_id IS NOT NULL THEN ti.template_ingredient_id END) AS nested_sub_recipes
 FROM ref.recipe_template t
 JOIN ref.food_item f ON f.food_id = t.food_id
 LEFT JOIN ref.template_ingredient ti ON ti.template_id = t.template_id

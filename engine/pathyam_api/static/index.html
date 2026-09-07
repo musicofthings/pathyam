@@ -1132,6 +1132,11 @@ async function loadNewsFeed() {
     const r = await fetch('/v1/news/rss');
     const feed = await r.json();
 
+    if (!feed.articles || feed.articles.length === 0) {
+      $('#news-feed-list').innerHTML = '<p class="empty-state">Could not reach PubMed just now. Nothing to show — pull to retry.</p>';
+      return;
+    }
+
     $('#news-feed-list').innerHTML = feed.articles.map(a => `
       <div class="card" style="border-left:4px solid var(--accent-lavender);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">

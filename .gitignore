@@ -25,6 +25,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
 # Pathyam Local Dev Data
 .devdata/
 *.log

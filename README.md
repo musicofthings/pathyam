@@ -1,148 +1,165 @@
-# Pathyam AI — Clinical Nutrition & Glycemic Engine
+# Pathyam — Clinical Nutrition & Glycemic Engine
 
-Pathyam is an AI-native metabolic nutrition platform tailored for South Indian cuisine. It combines probabilistic entity resolution, deterministic Monte Carlo recipe computation with credible intervals, Continuous Glucose Telemetry (CGT) peak prediction, and a Gen-Z Light Pastel multi-device web application.
+Pathyam computes the nutrient content of South Indian meals from **parametric recipe templates** rather than static lookup rows. A dish is a set of parameters (batter mass, oil quantity, fermentation hours) with prior distributions; the engine samples them, walks nested sub-recipes, applies cooking yield and retention factors, and returns every nutrient as an **80% credible interval** with its sources and confidence tier attached.
+
+That is the product. Everything else is in service of it.
 
 ---
 
-## 🗺️ Project Scope & Architecture Map
+## Status
 
-The following Mermaid diagram outlines the complete system architecture, highlighting **Accomplished Components** vs **Pending Roadmap**:
+The compute core is real and tested. Several surrounding features are scaffolding that does not yet do what its name suggests, and this README says which is which. Read the **Known gaps** table before quoting any capability.
+
+### Working
+
+| Component | Evidence |
+|---|---|
+| **Monte Carlo compute engine** | Nested sub-recipe walking, deterministic seeding, Spearman + eta-squared sensitivity attribution, per-nutrient confidence tracking that flags borrowed values. `pathyam_engine/engine.py` |
+| **AST expression sandbox** | Whitelisted evaluator over `qty_expr` strings from the database. Rejects attribute access, subscripts, comprehensions, starred args; bounds expression length and node count; traps non-finite results. Documented as a security boundary. `pathyam_engine/expressions.py` |
+| **FAO/INFOODS QC gates** | 10 gates: proximate sum, Atwater energy reconciliation, fatty acids ≤ total fat, sugars ≤ carbohydrate, yield plausibility, interval ordering and width, composition coverage, confidence floor. `pathyam_engine/qc.py` |
+| **Dish resolution** | Indic phonetic folding across Tamil, Kannada, Telugu, Malayalam and Hindi, modifier parsing (*konjam*, *swalpa*, *rendu*), pg_trgm reranking. Measured below. |
+| **Resolution eval harness** | 145 hand-written golden queries including deliberate abstain and absent cases, held-out ablation, abstention calibration. `pathyam_engine/evaluation/harness.py` |
+| **Recipe compiler** | State machine over authored templates: DRAFT → RESOLUTION_REQUIRED / MISSING_COMPOSITION / MISSING_QUANTITY / QC_FAILED → COMPUTABLE → VALIDATED. `pathyam_engine/compiler.py` |
+| **IFCT composition (52 ingredients)** | Hand-entered per-100g values with per-value uncertainties for the ingredients used by the authored templates. `pathyam_engine/authoring/ifct_data.py` |
+| **REST API** | `/v1/resolve`, `/v1/compute`, `/v1/log`, `/v1/history`, `/v1/templates`, `/v1/news/rss`, `/v1/evidence/explain`. |
+| **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
+| **Web UI** | Single-page app, 6 tabs, served same-origin from `pathyam_api/static/`. Relative API paths throughout. |
+
+### Known gaps
+
+These are **not** working. They exist in the codebase and have endpoints, which is exactly why they are listed here.
+
+| Gap | What actually happens | Planned |
+|---|---|---|
+| **Meal photo vision** | The configured model id `gemini-3.7-flash` is not a real Gemini model. Any live call fails, and the failure is swallowed — the provider returns a **hardcoded dosa-and-sambar observation** that the caller cannot distinguish from a real reading. | Phase 4 |
+| **`/v1/perception/analyze`** | Never reads the uploaded image. Defaults to `"masala dosa"` and returns a fixed bounding box and confidence. | Phase 4 |
+| **Meal history persistence** | `_JOURNAL_STORE` is a module-level Python list. History, portion edits and the dashboard are lost on restart and shared across every caller. There is no user identity in the API. `db/007_meal_logs_inference.sql` defines the tables this should use. | Phase 2 |
+| **Postgres composition data** | `ref.food_item` lacks composition rows, so templates that compile COMPUTABLE in memory are blocked via the API. The data exists in `ifct_data.py`; it is not loaded. | Phase 2 |
+| **Evidence retrieval** | `search_semantic` returns `search_lexical` unchanged — there is no pgvector and no Postgres FTS, so reciprocal rank fusion merges two identical rankings. The corpus is 3 documents in a Python list. | Phase 5 |
+| **Citation validation** | Confirms an identifier *resolves*; does not confirm the resolved record is the work being cited. A fabricated citation with a real-but-unrelated PMID passes. One shipped in this corpus and was removed in Phase 1. | Phase 5 |
+| **CGT glycemic prediction** | `predict_spike` coefficients (1.8, −0.02, −0.04) have no cited derivation. The curve shape and trapezoidal iAUC are correctly implemented; the constants are not sourced. **Do not present its output as clinical guidance.** | Phase 6 |
+| **`/v1/cgt/telemetry`** | Echoes its input. Stores nothing, used by nothing. | Phase 6 |
+| **Safety benchmarks** | The suite computes correctly, but **no golden meal dataset exists** — the only samples are two synthetic rows in a unit test. It has nothing to measure. | Phase 4 |
+| **Mobile app** | `apps/mobile` has never been installed or built and has no lockfile. Expo 51 / React Native 0.74. | Phase 6 |
+
+---
+
+## Measured performance
+
+Resolution is the only subsystem with a trustworthy number, because it is evaluated against a held-out lexicon with 65 aliases removed.
+
+```bash
+cd engine && PYTHONPATH=. python3 -m pathyam_engine.evaluation
+```
+
+145 queries · 262 lexicon entries · median 2.68 ms/query
+
+| Metric | Held-out |
+|---|---|
+| top-1 | **83.3%** |
+| top-5 | **92.0%** |
+| MRR | **0.867** |
+
+By category, top-1: exact English, native Tamil/Kannada/Telugu/Malayalam, code-mixed, ambiguous and modifier queries all **100%**; with-quantity **92.3%**; misspellings **81.2%**; colloquial **68.8%**; **romanised 53.3%**.
+
+Romanised input is the largest category (30 queries) and the weakest — and romanised Tamil, Telugu, Kannada and Malayalam is how most users will actually type. That is the open engineering problem.
+
+Abstention is well calibrated: 39.3% of queries ask for confirmation, 35.1% of those would otherwise have been wrong, only 3.4% are confident mistakes, and recall on cases the golden set marks "should ask" is 100%. Weak spot: 28.6% of genuinely absent dishes are still offered a candidate.
+
+---
+
+## Architecture
 
 ```mermaid
 flowchart TD
-    subgraph INPUT["1. Input & Perception"]
-        A1["Natural Text / Speech<br/>(Tamil, Kannada, Tel, Mal, Eng)"]:::done
-        A2["Meal Photo Camera Input"]:::done
-        A3["Live VLM Vision Model<br/>(Gemini 1.5 Flash / Pro API)"]:::pending
+    subgraph INPUT["1. Input"]
+        A1["Natural text<br/>(Tamil, Kannada, Telugu, Malayalam, English)"]:::done
+        A2["Meal photo upload"]:::partial
+        A3["VLM perception"]:::broken
     end
 
-    subgraph RESOLUTION["2. Probabilistic Entity Resolution"]
-        B1["Text Parser & Modifiers<br/>(konjam, swalpa, rendu, extra)"]:::done
-        B2["Indic Phonetic Folding<br/>(digraphs & script normalisation)"]:::done
-        B3["pg_trgm Trigram Reranker<br/>& Lexicon Search"]:::done
+    subgraph RESOLUTION["2. Probabilistic entity resolution"]
+        B1["Text parser & modifiers<br/>(konjam, swalpa, rendu)"]:::done
+        B2["Indic phonetic folding"]:::done
+        B3["pg_trgm reranker & lexicon"]:::done
     end
 
-    subgraph ENGINE["3. Deterministic Compute & CGT Engine"]
-        C1["AST Expression Whitelist Sandbox<br/>(expressions.py)"]:::done
-        C2["Monte Carlo Tree Recurrence<br/>& Sensitivity Attribution"]:::done
-        C3["FAO/INFOODS QC Gates<br/>(qc.py)"]:::done
-        C4["CGT Glycemic Peak & iAUC Predictor<br/>(predict_spike)"]:::done
-        C5["IFCT 2017 Raw Composition Data<br/>(17 Templates / 1 Computable)"]:::pending
+    subgraph ENGINE["3. Deterministic compute"]
+        C1["AST expression sandbox"]:::done
+        C2["Monte Carlo + sensitivity attribution"]:::done
+        C3["FAO/INFOODS QC gates"]:::done
+        C4["IFCT composition — 52 ingredients, in memory"]:::done
+        C5["IFCT composition loaded into Postgres"]:::pending
+        C6["CGT glycemic prediction<br/>(unsourced coefficients)"]:::partial
     end
 
-    subgraph API_UI["4. API Service & UI Application"]
-        D1["FastAPI Backend Service<br/>(/v1/resolve, /v1/compute, /v1/log)"]:::done
-        D2["Selective History & Portion Controls<br/>(PATCH /v1/history/{id}/portion)"]:::done
-        D3["Populated Recipe Catalog<br/>(GET /v1/templates)"]:::done
-        D4["Clinical Nutrition RSS News Feed<br/>(GET /v1/news/rss)"]:::done
-        D5["Gen-Z Light Pastel Web App<br/>(6 Navigation Tabs)"]:::done
-        D6["Flutter / React Native Mobile Apps<br/>(iOS & Android Bundle)"]:::pending
-        D7["Clinical RAG Explanation Layer<br/>(PMID / DOI Guideline Citations)"]:::pending
+    subgraph API_UI["4. API & UI"]
+        D1["FastAPI service"]:::done
+        D2["Meal history — in-memory only"]:::partial
+        D3["Recipe catalog"]:::done
+        D4["PubMed news feed"]:::done
+        D5["Web app, 6 tabs"]:::done
+        D6["Mobile app (never built)"]:::pending
+        D7["Evidence explanation layer"]:::partial
     end
 
     A1 --> B1
-    A2 --> B1
-    A3 -.-> B1
-    B1 --> B2
-    B2 --> B3
-    B3 --> C1
-    C1 --> C2
-    C2 --> C3
-    C3 --> C4
-    C4 --> D1
-    C5 -.-> C2
-    D1 --> D2
-    D1 --> D3
-    D1 --> D4
-    D1 --> D5
+    A2 --> A3
+    A3 -.broken.-> B1
+    B1 --> B2 --> B3 --> C1 --> C2 --> C3
+    C4 --> C2
+    C5 -.not loaded.-> C2
+    C3 --> D1
+    C3 --> C6
+    D1 --> D2 & D3 & D4 & D5
     D5 -.-> D6
     D1 -.-> D7
 
     classDef done fill:#D1FAE5,stroke:#10B981,stroke-width:2px,color:#065F46;
-    classDef pending fill:#FEF3C7,stroke:#F59E0B,stroke-width:2px,color:#92400E;
+    classDef partial fill:#FEF3C7,stroke:#F59E0B,stroke-width:2px,color:#92400E;
+    classDef pending fill:#E5E7EB,stroke:#9CA3AF,stroke-width:2px,color:#374151;
+    classDef broken fill:#FEE2E2,stroke:#EF4444,stroke-width:2px,color:#991B1B;
 ```
 
----
-
-## 📊 Summary of Accomplished vs Pending Features
-
-| Component | Status | Details |
-|---|---|---|
-| **Deterministic Compute Engine** | **Completed** | Monte Carlo sampling over AST expressions; 80% CI & sensitivity attribution. |
-| **AST Security Sandbox** | **Completed** | Whitelisted evaluator in `expressions.py` protecting against code execution. |
-| **FAO/INFOODS QC Gates** | **Completed** | 9 consistency validation rules in `qc.py`. |
-| **Indic Entity Resolution** | **Completed** | Phonetic folding across Tamil, Kannada, Telugu, Malayalam, & Hindi with pg_trgm fallback. |
-| **CGT Glycemic Telemetry** | **Completed** | Predictive peak glucose spike ($\Delta G_{\text{max}}$) & iAUC damping model based on fat/fibre intake. |
-| **FastAPI Backend REST Service** | **Completed** | `/v1/resolve`, `/v1/compute`, `/v1/log`, `/v1/history`, `/v1/templates`, `/v1/news/rss`. |
-| **Selective Portion Adjustments** | **Completed** | Unique UUID log isolation (`LOG-{uuid4()}`) with `➕` / `➖` portion modifiers and single-meal deletion. |
-| **Gen-Z Light Pastel Web UI** | **Completed** | Minimalist aesthetic with Google Fonts (`Plus Jakarta Sans` & `Space Grotesk`), blush canvas, 6 tabs. |
-| **Recipe Template Catalog** | **Completed** | Rich cards for all 20 active recipe templates with computability status and 1-click logging. |
-| **Clinical RSS News Feed** | **Completed** | Real-time clinical nutrition research feed aggregated from ICMR-NIN, PubMed, and Nature. |
-| **VLM Gemini Vision Pipeline** | **Pending** | Direct integration with Gemini 1.5 Flash/Pro for live dish & parameter estimation from photo uploads. |
-| **IFCT 2017 Data Expansion** | **Pending** | Expanding missing raw composition rows in `ref.food_item` to unblock 16 blocked recipe templates. |
-| **Mobile Native Packaging** | **Pending** | Wrapping the static bundle into Flutter / React Native containers for iOS App Store & Android APK. |
-| **Clinical RAG Explanation Layer** | **Pending** | Guidelines and PubMed paper retrieval with PMID citations for patient metabolic Q&A. |
+The separation between resolution and computation is load-bearing: `/v1/resolve` cannot return a nutrient value and `/v1/compute` cannot guess a dish, so no response can contain a number that did not come out of the engine's arithmetic.
 
 ---
 
-## 📱 Multi-Platform Architecture (Web + iOS + Android)
+## Running
 
-Pathyam uses a **unified single-source frontend architecture** to deliver web, iOS, and Android applications without UI logic duplication or version drift:
+### Test suite
 
-```
-                          ┌───────────────────────────┐
-                          │   pathyam_api/static/     │
-                          │   index.html + JS + CSS   │
-                          └─────────────┬─────────────┘
-                                        │
-           ┌────────────────────────────┼────────────────────────────┐
-           ▼                            ▼                            ▼
-┌──────────────────────┐    ┌──────────────────────┐    ┌──────────────────────┐
-│       WEB APP        │    │       iOS APP        │    │     ANDROID APP      │
-│ PWA / Desktop Web    │    │ WKWebView / Swift    │    │ Android WebView      │
-│ (manifest.json & sw) │    │ (Capacitor wrapper)  │    │ (Capacitor wrapper)  │
-└──────────────────────┘    └──────────────────────┘    └──────────────────────┘
-```
-
-1. **Shared Client Core (`/engine/pathyam_api/static/`)**:
-   - Single HTML5/CSS3/JavaScript application (`index.html`) implementing the Gen-Z Light Pastel design system.
-   - PWA Manifest ([`manifest.json`](file:///Users/theranosis_dx/projects/pathyam/engine/pathyam_api/static/manifest.json)) & Service Worker ([`sw.js`](file:///Users/theranosis_dx/projects/pathyam/engine/pathyam_api/static/sw.js)) for offline caching, home screen installation, and mobile app-shell rendering.
-2. **Native iOS & Android Integration**:
-   - **Viewport & Notch Handling**: Configured with `viewport-fit=cover` and iOS status bar styling (`apple-mobile-web-app-status-bar-style: default`).
-   - **Hardware Camera Access**: Standardized HTML5 `navigator.mediaDevices.getUserMedia` and `<input type="file" accept="image/*" capture="environment">` for seamless camera access on web, iOS WKWebView, and Android Web Chrome Client.
-   - **Zero Version Divergence**: All changes to the dashboard, meal logging, history, CGT simulation, recipe catalog, and news feed immediately update across Web, iOS, and Android bundles without maintaining separate UI codebases.
-
----
-
-## 🔍 Audit & Resolution of Previous Code Delivery Conflicts
-
-During the audit of code delivered by previous agents (Claude / Cursor), several structural bugs and conflicts were identified and resolved:
-
-1. **`PostgresRepository` Schema Discrepancies**:
-   - *Issue*: API handlers attempted to call non-existent repository methods like `svc.repo.all_templates()` and queried a non-existent `ref.food` table.
-   - *Resolution*: Updated queries to join `ref.recipe_template` and `ref.food_item` directly via `svc.conn.cursor()`, aligning FastAPI endpoints with the PostgreSQL schema in `db/004_recipe_templates.sql`.
-
-2. **Indic Unicode Normalisation Divergence**:
-   - *Issue*: Standard `\w` regex stripped Tamil vowel signs (combining marks), causing Python normalisation to diverge from PostgreSQL's `[[:alnum:]]`.
-   - *Resolution*: Implemented custom Indic phonetic folding in `resolution/trigram.py` preserving vowel signs across all target scripts.
-
-3. **History Journal Data Integrity**:
-   - *Issue*: History entries initially used coarse timestamp IDs (`LOG-{epoch_ms}`), causing deletions to wipe multiple entries logged in the same second.
-   - *Resolution*: Migrated to cryptographically isolated `LOG-{uuid4()}` identifiers with atomic `PATCH /v1/history/{entry_id}/portion` updates.
-
----
-
-## 🚀 Running & Verifying
-
-### Run Test Suite
 ```bash
 ./engine/run_tests.sh
 ```
-*Current result: **255 tests passing** (196 unit, 59 integration/API).*
 
-### Launch Development Server
+Current result: **266 tests passing** — 207 unit, 59 integration/API. The integration suite seeds a throwaway Postgres from `db/` via `pgserver`; no Docker and no root required.
+
+### Development server
+
 ```bash
-cd engine
-./dev.sh
+cd engine && ./dev.sh
 ```
-*Serves the application on [http://127.0.0.1:8000/](http://127.0.0.1:8000/).*
+
+Serves on `http://127.0.0.1:8000/`. No authentication, no rate limiting, no request logging — bound to loopback deliberately. Do not expose it.
+
+### Configuration
+
+Copy `.env.example` to `.env`. `ALLOWED_ORIGINS` is required in production: when it is unset and `PATHYAM_ENV != development`, the CORS allowlist is **empty**, not `*`. Credentials are enabled, so a wildcard is never valid.
+
+---
+
+## Multi-platform
+
+The web UI in `engine/pathyam_api/static/` is a single HTML/CSS/JS application with a PWA manifest and service worker, intended to be wrapped for iOS and Android rather than reimplemented. `apps/mobile` is an Expo scaffold toward that; it has not been built.
+
+---
+
+## Development phases
+
+1. **Restore trust** — fix the build, remove fabricated data and uncomputed metrics, make the docs match the code. *(complete)*
+2. **Real data spine** — load IFCT composition into Postgres, persist the meal journal, introduce user identity.
+3. **Close the resolution gap** — romanised top-1 from 53.3% to ≥80%.
+4. **Earn the perception layer** — correct the model id, fail loudly, collect a golden meal dataset, publish measured portion error.
+5. **Earn the evidence layer** — validate citations by title/author agreement, build a real corpus, implement both retrieval arms.
+6. **Clinical validation** — source or relabel the CGT model, multi-user foundations, ship a mobile build.

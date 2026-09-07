@@ -44,15 +44,6 @@ CLINICAL_EVIDENCE_CORPUS = [
         authors=["ICMR-NIN Expert Group"],
         publication_year=2020,
     ),
-    EvidenceDocument(
-        evidence_id="EVIDENCE_004",
-        tier=EvidenceTier.TIER_2_PUBMED,
-        title="Dietary Fiber and Postprandial Glycemic Response in Type 2 Diabetes",
-        content="Viscous soluble fibre from pulses and fenugreek seeds delays gastric emptying and attenuates postprandial glucose spikes.",
-        pmid="31234567",
-        authors=["Vijayakumar A", "Dubasi HB"],
-        publication_year=2021,
-    ),
 ]
 
 

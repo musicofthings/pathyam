@@ -1,12 +1,19 @@
-"""Citation Hallucination Prevention Enforcer.
+"""Citation existence checks for PMIDs, DOIs and guideline references.
 
-Validates PMIDs, DOIs, and Guideline references before clinical explanations are rendered.
+WHAT THIS DOES: confirms an identifier resolves — that the PMID exists in PubMed,
+that the DOI resolves in Crossref.
 
-Strict Rules:
-  1. Never prompt the LLM to 'invent' or 'guess' references.
-  2. Every PMID is checked via NCBI E-utilities.
-  3. Every DOI is checked via Crossref REST API.
-  4. If verification fails, the citation is SUPPRESSED silently.
+WHAT THIS DOES NOT DO, and must not be described as doing: it does not check that
+the resolved record is the work the claim cites. A citation whose title and authors
+were written first and had a plausible-looking PMID attached afterwards passes every
+check here, because the PMID does exist — it simply belongs to a different paper.
+That exact case shipped in this corpus (EVIDENCE_004 cited PMID 31234567, a paper on
+electrical impedance tomography of granular material) and was not caught.
+
+Until title/author/year agreement is implemented, treat a pass as "the identifier is
+real", not "the citation is correct". A network failure is also currently
+indistinguishable from a failed lookup, so an outage silently suppresses good
+citations rather than reporting that it could not check.
 """
 
 from __future__ import annotations
@@ -23,10 +30,6 @@ __all__ = ["CitationValidator", "validate_citation"]
 KNOWN_VALID_REFS = {
     "PMID:35875218": {
         "title": "Glycemic carbohydrates, glycemic index and glycemic load of commonly consumed South Indian breakfast foods",
-        "type": "pmid",
-    },
-    "PMID:31234567": {
-        "title": "Dietary Fiber and Postprandial Glycemic Response in Type 2 Diabetes",
         "type": "pmid",
     },
     "DOI:10.1007/s13197-022-05368-6": {

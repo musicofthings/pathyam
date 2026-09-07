@@ -284,3 +284,65 @@ def test_cgt_telemetry_and_predict_spike(client):
     assert cgt["glycemic_load"] == 35.0
     assert len(cgt["curve"]) > 10
 
+
+
+# -------------------------------------------------------------- news feed ----
+#
+# These stub NCBIClient so the suite never touches the network. The point of the
+# second test is the regression guard: this endpoint used to return four invented
+# articles in journals that do not exist, and an outage must now produce an empty
+# feed rather than canned content.
+
+
+class _StubNCBI:
+    def __init__(self, pmids=None, summaries=None, abstracts=None):
+        self._pmids = pmids or []
+        self._summaries = summaries or {}
+        self._abstracts = abstracts or {}
+
+    def search_pubmed(self, query, max_results=5, sort=None):
+        return self._pmids
+
+    def fetch_pubmed_summaries(self, pmids):
+        return self._summaries
+
+    def fetch_abstracts(self, pmids):
+        return self._abstracts
+
+
+def test_news_feed_returns_real_pubmed_records(client, monkeypatch):
+    import pathyam_api.main as main
+
+    stub = _StubNCBI(
+        pmids=["35875218"],
+        summaries={
+            "35875218": {
+                "title": "Glycemic carbohydrates of South Indian breakfast foods.",
+                "fulljournalname": "Journal of Food Science and Technology",
+                "pubdate": "2022 Aug",
+                "authors": [{"name": "Shakappa D"}, {"name": "Naik R"}],
+            }
+        },
+        abstracts={"35875218": "Idli showed a lower glycemic index than white rice."},
+    )
+    monkeypatch.setattr(main, "NCBIClient", lambda *a, **kw: stub)
+
+    body = client.get("/v1/news/rss").json()
+    assert body["count"] == 1
+    article = body["articles"][0]
+    assert article["link"] == "https://pubmed.ncbi.nlm.nih.gov/35875218/"
+    assert "Journal of Food Science and Technology" in article["source"]
+    assert "Shakappa D" in article["source"]
+    assert article["summary"] == "Idli showed a lower glycemic index than white rice."
+    assert article["published_at"] == "2022 Aug"
+
+
+def test_news_feed_is_empty_when_pubmed_is_unreachable(client, monkeypatch):
+    """Regression guard: an outage must not fall back to fabricated articles."""
+    import pathyam_api.main as main
+
+    monkeypatch.setattr(main, "NCBIClient", lambda *a, **kw: _StubNCBI())
+
+    body = client.get("/v1/news/rss").json()
+    assert body["count"] == 0
+    assert body["articles"] == []
