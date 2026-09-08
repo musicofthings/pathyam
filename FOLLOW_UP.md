@@ -1,6 +1,6 @@
 # Pathyam — what was done, and what needs you
 
-_Written 2026-09-08. Branch `phase1/restore-trust`, all pushed, suite green at 364._
+_Written 2026-09-08. Branch `phase1/restore-trust`, suite green at 395._
 
 This session started as a repo review and turned into six phases of work. The short
 version: the codebase contained a lot of confident-looking fabrication, that is gone,
@@ -14,7 +14,7 @@ you can authorise or supply.
 | # | What | Why it's blocked on you |
 |---|---|---|
 | 1 | **OpenRouter API key + model id** | The vision provider now targets OpenRouter and fails loudly, but **has never made a live call** — there is no key in this environment. Set `OPENROUTER_API_KEY`, then pick a model with `python3 -m pathyam_engine.vision --list` and put it in `PATHYAM_VISION_MODEL`. Unlike before, the id can be checked without a key: `python3 -m pathyam_engine.vision <id>` verifies against OpenRouter's public catalogue that the model exists *and* accepts images. |
-| 2 | **ICMR-NIN written permission** | All 19,999 IFCT composition values sit behind `is_commercial_cleared = false` and show in `ref.v_uncleared_values`, which is the release gate. IFCT 2017 is free-to-read, not established as free to commercialise (dossier risk R1). **You cannot ship commercially until this letter lands.** The dossier notes one approach letter can cover both the IFCT licence and a GI-data collaboration — it calls this the highest-leverage email in the document. |
+| 2 | **ICMR-NIN written permission** — _deferred to commercialisation, your call_ | Nothing is blocked today: everything computes, the flag only gates *commercial* release. `ref.v_release_blockers` is the pre-launch checklist and now covers two asset classes — IFCT composition and the CGMacros cohort. The dossier notes one approach letter can cover both the IFCT licence and a GI-data collaboration. |
 | 3 | **Native-speaker review of the lexicon** | `engine/eval/lexicon_south_indian.yaml` says at the top that it needs this before it is trusted. I added three native-script names marked `# REVIEW`. Malayalam and Telugu are flagged as least certain. |
 | 4 | **Clinical review of the evidence corpus** | 42 real PubMed papers, but drawn from **seven queries I chose**. That is a starting point for this domain, not a systematic review, and it inherits whatever those queries miss. Someone clinical should review the query set in `authoring/evidence_corpus.py`. |
 | 5 | **Is the CGT curve shown to users at all?** | It is now labelled illustrative everywhere, but it is still four unsourced coefficients drawn as a glucose curve. Options: keep it labelled, hide it until fitted, or drop it. A person managing type 2 diabetes is the user this matters for. |
@@ -26,7 +26,7 @@ you can authorise or supply.
 | # | What | Size |
 |---|---|---|
 | 6 | **Golden meal dataset** — ≥50 photographed South Indian meals with weighed component masses. Until this exists, portion accuracy and nutrient error are **unknown**, and the safety benchmark suite has nothing to measure. Gates any claim that vision is accurate. | Days of kitchen work |
-| 7 | **Paired CGM traces + weighed meal records** to fit the CGT coefficients. The plumbing is done — readings persist, and `GET /v1/cgt/postprandial/{meal_log_id}` returns the measured trace beside the prediction. Nothing fits them yet. | Weeks, needs participants |
+| 7 | **Paired CGM traces + weighed meal records** to fit the CGT coefficients. Plumbing done and now exercised: CGMacros loads into `research.*` and pairs correctly. But that cohort is Californian and its meals are not South Indian, so it validates the pipeline and must not fit the model. Suggested route: **n-of-1 first** — one participant, a Libre sensor, glucose synced from Apple Health / Health Connect via the mobile app. Days, not weeks. | Days for n-of-1 |
 | 8 | **New golden resolution queries**, authored independently. Do **not** back-fill them from the alias list — that is what made the first harness report a meaningless 100%. | Hours |
 
 ---
@@ -40,9 +40,9 @@ in-process only, so the edge limit is still worth having; see README.)_
 |---|---|---|
 | 10 | Password reset + email verification | Needs somewhere to send mail. An account whose password is forgotten is currently unrecoverable. |
 | 12 | Semantic retrieval (pgvector) | Needs an embedding provider. `reciprocal_rank_fusion` is correct and unused until a second arm exists. I would not add a stub returning lexical results under a semantic name — that is what I removed. |
-| 13 | Romanised resolution: last ~2 queries | 63.3% against a **70.0% ceiling** (see below). `dosai` and `dose` still lose to qualified dosa siblings. |
-| 14 | Mobile app | `apps/mobile` has never been installed or built, no lockfile, Expo 51 / RN 0.74 (~2 years old). |
-| 15 | `_POOL` is a module global | Constructing a second `TestClient` re-runs the app lifespan and closes the shared pool. Bit one test this session. Latent. |
+| 13 | Romanised resolution: last ~2 queries | 63.3% against a 70.0% ceiling. **Re-diagnosed 2026-09-08: smaller than this said.** The dosa cluster is already fixed. Of three remaining reachable failures, `pulihora` is not a resolver bug — held out from tamarind rice, lemon rice legitimately contains the exact token via `nimmakaya pulihora`, so preferring it is correct. Real headroom is `saaru` and `uppittu`; fixing 2 of 145 risks overfitting the eval set. |
+| 14 | Mobile app | **Largely done.** Rewritten: real API calls, bearer auth, HealthKit/Health Connect glucose sync, no localhost fallback, light theme. Four fabrications removed (see `apps/mobile/README.md`) including client-side calorie computation. Typechecks strict; **still never installed or built**, no lockfile, Expo 51/RN 0.74. Left: photo screen, token persistence. |
+| 15 | ~~`_POOL` is a module global~~ | **Done** (`8fd2d47`). Pool is on `app.state`, lifespans reference-counted. |
 
 ---
 
