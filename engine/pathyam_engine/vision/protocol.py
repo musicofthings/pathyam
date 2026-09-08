@@ -62,9 +62,13 @@ class VisualItemObservation:
 
 @dataclass(frozen=True)
 class MealObservation:
+    # model_version is required and has no default. It used to default to
+    # "gemini-3.7-flash" -- a model that does not exist -- so an observation
+    # constructed without one was stamped with a fabricated provenance. Whatever
+    # produced the observation must say so, including the mock (which says "mock").
     items: list[VisualItemObservation]
+    model_version: str
     raw_vlm_response: str | None = None
-    model_version: str = "gemini-3.7-flash"
 
     def as_dict(self) -> dict[str, Any]:
         return {

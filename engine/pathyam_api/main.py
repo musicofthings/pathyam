@@ -28,7 +28,7 @@ from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository
 from pathyam_engine.distributions import PriorError
 from pathyam_engine.expressions import ExpressionError
 from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
-from pathyam_engine.vision import (GeminiVisionProvider, VisionError,
+from pathyam_engine.vision import (OpenRouterVisionProvider, VisionError,
                                    VisionNotConfigured, evaluate_image_quality)
 from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
@@ -475,14 +475,14 @@ async def resolve_meal_vision(
     region_key: str | None = Form(default=None),
     svc: _Services = Depends(get_services),
 ) -> s.VisionResolveResponse:
-    """Analyze a meal photo using Gemini 3.7 Flash Structured Outputs and entity resolution."""
+    """Analyse a meal photo through the configured VLM, then resolve each item."""
     image_bytes = await file.read()
 
     # 1. Quality Gate
     q_gate = evaluate_image_quality(image_bytes)
 
-    # 2. Vision Extractor (Gemini 3.7 Flash)
-    provider = GeminiVisionProvider()
+    # 2. Vision extractor — OpenRouter, model from PATHYAM_VISION_MODEL
+    provider = OpenRouterVisionProvider()
     try:
         meal_obs = await provider.analyse_meal(image_bytes)
     except VisionNotConfigured as exc:
@@ -1073,7 +1073,7 @@ async def analyze_perception(
             detail={"reason": "image failed the quality gate", "issues": gate.issues},
         )
 
-    provider = GeminiVisionProvider()
+    provider = OpenRouterVisionProvider()
     try:
         observation = await provider.analyse_meal(image_bytes)
     except VisionNotConfigured as exc:
