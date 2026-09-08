@@ -6,6 +6,7 @@ No test in this file makes a network call.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 import pytest
@@ -104,16 +105,17 @@ async def test_an_api_failure_raises_and_never_degrades_into_the_mock(monkeypatc
     """The failure mode that made every meal photo return dosa and sambar."""
     monkeypatch.delenv("PATHYAM_MOCK_VISION", raising=False)
 
-    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="some/model")
+    monkeypatch.setattr(op, "_get_json", lambda url, **kw: _CATALOGUE)
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
 
-    def boom(_image):
+    def boom(_image, _model):
         raise RuntimeError("upstream 404: model not found")
 
     monkeypatch.setattr(provider, "_post_completion", boom)
 
     with pytest.raises(VisionError) as excinfo:
         await provider.analyse_meal(FAKE_JPEG)
-    assert "some/model" in str(excinfo.value), "the error must name the model tried"
+    assert "vendor/sees-images" in str(excinfo.value), "the error must name the model tried"
 
 
 @pytest.mark.asyncio
@@ -121,9 +123,10 @@ async def test_a_non_json_reply_raises_rather_than_yielding_an_empty_meal(monkey
     """json.loads used to run unguarded; a prose reply would have thrown a bare
     JSONDecodeError, and an empty dict would have produced a meal with no items."""
     monkeypatch.delenv("PATHYAM_MOCK_VISION", raising=False)
-    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="some/model")
+    monkeypatch.setattr(op, "_get_json", lambda url, **kw: _CATALOGUE)
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
     monkeypatch.setattr(provider, "_post_completion",
-                        lambda _i: "I'm sorry, I can't identify this photo.")
+                        lambda _i, _m: "I'm sorry, I can't identify this photo.")
 
     with pytest.raises(VisionError, match="did not return JSON"):
         await provider.analyse_meal(FAKE_JPEG)
@@ -146,13 +149,30 @@ def test_no_default_model_id_is_baked_into_the_provider(monkeypatch):
 # ------------------------------------------------- catalogue verification ----
 #
 # The point of moving to OpenRouter: a configured model id can be checked against a
-# public catalogue before a key exists. These tests stub the catalogue fetch.
+# public catalogue before a key exists, and a model can be chosen from it
+# automatically. These tests stub the catalogue fetch; none touches the network.
+
+
+def _raw(model_id, *, modalities=("text", "image"), out=("text",), params=("structured_outputs", "response_format"),
+         prompt="0", completion="0", image="0", ctx=100000, expires=None):
+    return {
+        "id": model_id,
+        "name": model_id,
+        "context_length": ctx,
+        "architecture": {"input_modalities": list(modalities), "output_modalities": list(out)},
+        "supported_parameters": list(params),
+        "pricing": {"prompt": prompt, "completion": completion, "image": image},
+        "expiration_date": expires,
+    }
+
 
 _CATALOGUE = {
     "data": [
-        {"id": "vendor/sees-images", "architecture": {"input_modalities": ["text", "image"]}},
-        {"id": "vendor/text-only", "architecture": {"input_modalities": ["text"]}},
-        {"id": "other/also-sees", "architecture": {"input_modalities": ["text", "image"]}},
+        _raw("vendor/sees-images"),
+        _raw("vendor/text-only", modalities=("text",)),
+        _raw("other/also-sees", ctx=50000),
+        _raw("paid/good", prompt="0.000002", completion="0.000008"),
+        _raw("paid/dear", prompt="0.00002", completion="0.00008"),
     ]
 }
 
@@ -162,12 +182,20 @@ def catalogue(monkeypatch):
     monkeypatch.setattr(op, "_get_json", lambda url, **kw: _CATALOGUE)
 
 
+def _cat(*raws):
+    return [m for m in (op._parse_model(r) for r in raws) if m is not None]
+
+
 def test_verify_accepts_a_model_that_exists_and_takes_images(catalogue):
     verify_model_id("vendor/sees-images")     # does not raise
 
 
 def test_verify_rejects_a_model_id_that_does_not_exist(catalogue):
-    """The exact bug that shipped: 'gemini-3.7-flash' was never a real model."""
+    """The exact bug that shipped: 'gemini-3.7-flash' was not a real model then.
+
+    (It is now — Google shipped it later. A guess that comes true a year on is
+    still a guess, and it failed every call for as long as it was in the code.)
+    """
     with pytest.raises(VisionModelUnavailable, match="gemini-3.7-flash"):
         verify_model_id("google/gemini-3.7-flash")
 
@@ -197,6 +225,143 @@ def test_an_unreachable_catalogue_is_an_error_not_an_empty_allowlist(monkeypatch
         verify_model_id("vendor/sees-images")
 
 
+# ------------------------------------------------------ automatic selection ----
+
+TODAY = dt.date(2026, 9, 8)
+
+
+def test_free_is_preferred_over_paid():
+    chosen = op.select_vision_model(
+        _cat(_raw("paid/one", prompt="0.000001", completion="0.000001"),
+             _raw("free/one")),
+        prefer=op.PREFER_FREE, today=TODAY)
+    assert chosen.id == "free/one"
+    assert chosen.is_free
+
+
+def test_a_music_model_priced_at_zero_does_not_win_the_free_tier():
+    """google/lyria-* are listed image-capable at zero cost, and emit audio.
+
+    A filter that merely required text among the output modalities put a music
+    generator at the top of a free-first ranking.
+    """
+    chosen = op.select_vision_model(
+        _cat(_raw("google/lyria-3-pro-preview", out=("text", "audio"), ctx=1048576),
+             _raw("real/vision", ctx=1000)),
+        prefer=op.PREFER_FREE, today=TODAY)
+    assert chosen.id == "real/vision"
+
+
+def test_an_auto_router_never_wins_on_price():
+    """OpenRouter marks auto-routed models with a negative per-token price.
+
+    Read as a number that is cheaper than free, so cheapest-first put it first — at
+    an unbounded real cost, and with the model that read the photograph chosen
+    somewhere else, so model_version would name a router rather than a reader.
+    """
+    catalogue = _cat(_raw("openrouter/auto", prompt="-1", completion="-1", ctx=2000000),
+                     _raw("paid/known", prompt="0.00001", completion="0.00001"))
+    assert [m.id for m in op.usable_models(catalogue, today=TODAY)] == ["paid/known"]
+    assert op.select_vision_model(catalogue, prefer=op.PREFER_CHEAPEST, today=TODAY).id == "paid/known"
+
+
+def test_a_model_that_cannot_return_json_is_never_selected():
+    """Of the ten free image-capable models in the live catalogue, most support no
+    JSON mode at all. Selecting one returns prose on the first meal photo."""
+    catalogue = _cat(_raw("free/prose", params=("temperature",)),
+                     _raw("paid/json", prompt="0.00001", completion="0.00001"))
+    assert [m.id for m in op.usable_models(catalogue, today=TODAY)] == ["paid/json"]
+    assert op.select_vision_model(catalogue, prefer=op.PREFER_FREE, today=TODAY).id == "paid/json"
+
+
+def test_a_model_expiring_soon_is_not_selected_automatically():
+    """It stops working on a date nobody is watching, with no code change.
+
+    This is not hypothetical: the only free model supporting strict schemas when
+    this was written was due to expire 22 days later.
+    """
+    catalogue = _cat(_raw("free/expiring", expires="2026-09-30"),
+                     _raw("free/durable"))
+    assert op.select_vision_model(catalogue, prefer=op.PREFER_FREE, today=TODAY).id == "free/durable"
+
+
+def test_free_preference_falls_back_to_paid_rather_than_failing():
+    """A free tier that empties overnight should degrade to a working paid call,
+    not to no vision at all."""
+    chosen = op.select_vision_model(
+        _cat(_raw("paid/cheap", prompt="0.000001", completion="0.000001"),
+             _raw("paid/dear", prompt="0.001", completion="0.001")),
+        prefer=op.PREFER_FREE, today=TODAY)
+    assert chosen.id == "paid/cheap"
+
+
+def test_strict_schema_support_breaks_ties_within_a_price_tier():
+    chosen = op.select_vision_model(
+        _cat(_raw("free/loose", params=("response_format",), ctx=999999),
+             _raw("free/strict", params=("structured_outputs", "response_format"), ctx=1000)),
+        prefer=op.PREFER_FREE, today=TODAY)
+    assert chosen.id == "free/strict", "a schema the provider enforces beats a bigger context"
+
+
+def test_selection_is_deterministic():
+    catalogue = _cat(_raw("b/model"), _raw("a/model"))
+    picks = {op.select_vision_model(catalogue, prefer=op.PREFER_FREE, today=TODAY).id
+             for _ in range(5)}
+    assert picks == {"a/model"}
+
+
+def test_no_usable_model_raises_rather_than_returning_something_unusable():
+    with pytest.raises(VisionModelUnavailable, match="no OpenRouter model is usable"):
+        op.select_vision_model(_cat(_raw("free/prose", params=("temperature",))),
+                               prefer=op.PREFER_FREE, today=TODAY)
+
+
+# ------------------------------------------------------------- resolution ----
+
+def test_auto_resolves_from_the_catalogue(catalogue):
+    model, why = op.resolve_model("auto", today=TODAY)
+    assert model.id == "vendor/sees-images"
+    assert "auto-selected" in why
+
+
+def test_auto_free_and_auto_cheapest_are_both_accepted(catalogue):
+    assert op.resolve_model("auto:free", today=TODAY)[0].is_free
+    assert op.resolve_model("auto:cheapest", today=TODAY)[0].id in {
+        "vendor/sees-images", "other/also-sees"}
+
+
+def test_an_explicit_id_is_never_silently_overridden_by_auto_selection(catalogue):
+    """Automatic selection is a convenience, not a policy the operator cannot escape."""
+    model, why = op.resolve_model("other/also-sees", today=TODAY)
+    assert model.id == "other/also-sees"
+    assert "configured explicitly" in why
+
+
+def test_an_explicit_id_that_cannot_return_json_is_refused(monkeypatch):
+    monkeypatch.setattr(op, "_get_json", lambda url, **kw: {
+        "data": [_raw("free/prose", params=("temperature",))]})
+    with pytest.raises(VisionModelUnavailable, match="neither json_schema nor"):
+        op.resolve_model("free/prose", today=TODAY)
+
+
+@pytest.mark.asyncio
+async def test_an_unconfigured_provider_still_refuses_to_guess(monkeypatch):
+    """Auto-selection did not reintroduce a default. Unset is still unconfigured."""
+    monkeypatch.delenv("PATHYAM_MOCK_VISION", raising=False)
+    monkeypatch.delenv("PATHYAM_VISION_MODEL", raising=False)
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY)
+    with pytest.raises(VisionNotConfigured, match="no vision model configured"):
+        await provider.analyse_meal(FAKE_JPEG)
+
+
+def test_the_free_tier_warning_names_the_actual_risk():
+    """Free endpoints are free because the provider may use what you send, and what
+    this provider sends is a photograph of someone's meal, usually at home."""
+    warning = op.FREE_TIER_WARNING.lower()
+    assert "train on or publish" in warning
+    assert "personal data" in warning
+
+
 # ------------------------------------------------------- request construction --
 
 def test_the_request_carries_the_image_and_the_strict_schema(monkeypatch):
@@ -222,7 +387,8 @@ def test_the_request_carries_the_image_and_the_strict_schema(monkeypatch):
     monkeypatch.setattr(op.urllib.request, "urlopen", fake_urlopen)
 
     provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
-    assert provider._post_completion(FAKE_JPEG) == '{"items": []}'
+    strict = _cat(_raw("vendor/sees-images"))[0]
+    assert provider._post_completion(FAKE_JPEG, strict) == '{"items": []}'
 
     assert captured["url"].endswith("/chat/completions")
     assert captured["auth"] == f"Bearer {PLACEHOLDER_KEY}"
@@ -255,5 +421,41 @@ def test_a_provider_error_inside_a_200_body_is_not_treated_as_a_reading(monkeypa
     monkeypatch.setattr(op.urllib.request, "urlopen", lambda req, timeout=None: _Resp())
 
     provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
+    model = _cat(_raw("vendor/sees-images"))[0]
     with pytest.raises(VisionError, match="insufficient credits"):
-        provider._post_completion(FAKE_JPEG)
+        provider._post_completion(FAKE_JPEG, model)
+
+
+def test_a_model_without_strict_schemas_gets_the_schema_in_the_prompt(monkeypatch):
+    """Most free vision models support json_object but not json_schema.
+
+    Sending them a json_schema request is an error, not a graceful downgrade, so the
+    request adapts: the format drops to json_object and the schema travels in the
+    system prompt, where it is at least stated. Our parser becomes the only check,
+    which is why a malformed reply must raise rather than yield an empty meal.
+    """
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": '{"items": []}'}}]}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = json.loads(req.data.decode())
+        return _Resp()
+
+    monkeypatch.setattr(op.urllib.request, "urlopen", fake_urlopen)
+
+    loose = _cat(_raw("free/loose", params=("response_format",)))[0]
+    assert loose.response_format_mode == "json_object"
+
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="free/loose")
+    provider._post_completion(FAKE_JPEG, loose)
+
+    body = captured["body"]
+    assert body["response_format"] == {"type": "json_object"}
+    system = body["messages"][0]["content"]
+    assert "visual_label" in system, "the schema must reach a model that cannot be given one"
+    assert "estimated_portion" in system
