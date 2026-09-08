@@ -1094,3 +1094,189 @@ def test_the_dashboard_card_makes_no_clinical_judgement(client):
     assert "trajectory optimal" not in page.replace("Postprandial trajectory optimal\" —", "")
     assert "<span>CGT Sensor Spike</span>" not in page
     assert "<span>Measured Glucose</span>" in page
+
+
+# ------------------------------------------------------------ password reset ----
+#
+# Before this, an account whose password was forgotten was unrecoverable.
+
+
+def _forgot(client, email):
+    return client.post("/v1/auth/password/forgot", json={"email": email})
+
+
+def _reset_token(monkeypatch_free_mailer):
+    """The token the console mailer captured, pulled out of the message body."""
+    import re
+    body = monkeypatch_free_mailer.sent[-1]["body"]
+    match = re.search(r"\n\s{2,}(\S{20,})\n", body)
+    assert match, f"no token found in:\n{body}"
+    return match.group(1)
+
+
+@pytest.fixture
+def mailer(monkeypatch):
+    """Console mailer we can read, plus a cleared rate limiter.
+
+    The limiter is process-global by design (see ratelimit.py — it is an in-process
+    brake, not the edge limit), so it accumulates across the whole test module. A
+    reset flow is several credential calls, which is enough to trip the 10/60s
+    allowance on its own once earlier tests have spent some of it.
+    """
+    from pathyam_api import mailer as mailer_mod
+    from pathyam_api import main as main_mod
+
+    main_mod._auth_limiter._hits.clear()
+    sender = mailer_mod.ConsoleMailer()
+    monkeypatch.setattr(main_mod, "_MAILER", sender)
+    monkeypatch.delenv("PATHYAM_APP_URL", raising=False)
+    return sender
+
+
+def _new_account(client, email="reset-me@example.com", password="original-password-1"):
+    r = client.post("/v1/auth/register", json={"email": email, "password": password})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_a_forgotten_password_can_be_reset_and_signs_you_in(client, mailer):
+    email = "reset-flow@example.com"
+    _new_account(client, email)
+
+    assert _forgot(client, email).status_code == 202
+    token = _reset_token(mailer)
+
+    reset = client.post("/v1/auth/password/reset",
+                        json={"token": token, "new_password": "a-brand-new-password"})
+    assert reset.status_code == 200, reset.text
+    session = reset.json()
+    assert session["access_token"]
+
+    # The returned session works, and the new password works.
+    assert client.get("/v1/auth/me", headers={
+        "Authorization": f"Bearer {session['access_token']}"}).status_code == 200
+    assert client.post("/v1/auth/login", json={
+        "email": email, "password": "a-brand-new-password"}).status_code == 200
+    assert client.post("/v1/auth/login", json={
+        "email": email, "password": "original-password-1"}).status_code == 401
+
+
+def test_resetting_revokes_every_other_session(client, mailer):
+    """The point of a reset. A reset commonly happens because someone else got in;
+    leaving their session alive would make the whole exercise cosmetic."""
+    email = "reset-evicts@example.com"
+    intruder = _new_account(client, email)["access_token"]
+    intruder_headers = {"Authorization": f"Bearer {intruder}"}
+    assert client.get("/v1/auth/me", headers=intruder_headers).status_code == 200
+
+    _forgot(client, email)
+    reset = client.post("/v1/auth/password/reset", json={
+        "token": _reset_token(mailer), "new_password": "a-brand-new-password"})
+    assert reset.status_code == 200
+
+    assert client.get("/v1/auth/me", headers=intruder_headers).status_code == 401, \
+        "the pre-existing session survived the reset"
+    # ...but the session the reset handed back is live.
+    assert client.get("/v1/auth/me", headers={
+        "Authorization": f"Bearer {reset.json()['access_token']}"}).status_code == 200
+
+
+def test_a_reset_token_works_only_once(client, mailer):
+    """It sits in an inbox, which is not a place for a reusable credential."""
+    email = "reset-once@example.com"
+    _new_account(client, email)
+    _forgot(client, email)
+    token = _reset_token(mailer)
+
+    assert client.post("/v1/auth/password/reset", json={
+        "token": token, "new_password": "first-new-password"}).status_code == 200
+    replayed = client.post("/v1/auth/password/reset", json={
+        "token": token, "new_password": "second-new-password"})
+    assert replayed.status_code == 400
+    assert "already used" in replayed.json()["detail"]
+
+
+def test_requesting_a_second_reset_invalidates_the_first(client, mailer):
+    """An attacker who requests a link first must not keep it alive while the real
+    owner requests another."""
+    email = "reset-supersede@example.com"
+    _new_account(client, email)
+    _forgot(client, email)
+    first = _reset_token(mailer)
+    _forgot(client, email)
+    second = _reset_token(mailer)
+    assert first != second
+
+    assert client.post("/v1/auth/password/reset", json={
+        "token": first, "new_password": "should-not-work-x"}).status_code == 400
+    assert client.post("/v1/auth/password/reset", json={
+        "token": second, "new_password": "should-work-fine-x"}).status_code == 200
+
+
+def test_forgot_does_not_reveal_whether_an_address_has_an_account(client, mailer):
+    """Otherwise this endpoint is a way to test whether someone is a Pathyam user."""
+    _new_account(client, "known-user@example.com")
+
+    known = _forgot(client, "known-user@example.com")
+    unknown = _forgot(client, "definitely-not-registered@example.com")
+
+    assert known.status_code == unknown.status_code == 202
+    assert known.json() == unknown.json()
+    # And no mail was generated for the address that does not exist.
+    assert len(mailer.sent) == 1
+    assert mailer.sent[0]["to"] == "known-user@example.com"
+
+
+def test_an_unknown_or_garbage_token_is_refused(client, mailer):
+    bad = client.post("/v1/auth/password/reset", json={
+        "token": "not-a-real-token-at-all", "new_password": "a-valid-password-1"})
+    assert bad.status_code == 400
+
+
+def test_reset_will_not_set_a_password_registration_would_have_refused(client, mailer):
+    """Otherwise reset becomes the way around the minimum length."""
+    email = "reset-weak@example.com"
+    _new_account(client, email)
+    _forgot(client, email)
+
+    weak = client.post("/v1/auth/password/reset", json={
+        "token": _reset_token(mailer), "new_password": "short"})
+    assert weak.status_code == 422
+
+
+def test_reset_clears_a_lockout(client, mailer):
+    """A user locked out by someone else guessing at their password must be able to
+    get back in. Otherwise an attacker can deny access simply by guessing wrong."""
+    email = "reset-locked@example.com"
+    _new_account(client, email, password="original-password-1")
+
+    # The per-IP rate limiter (10/60s) would trip before the per-account lockout
+    # (8 attempts) does, and this test is about the lockout. Cleared between steps
+    # so one mechanism is exercised at a time.
+    from pathyam_api import main as main_mod
+
+    for _ in range(9):
+        main_mod._auth_limiter._hits.clear()
+        client.post("/v1/auth/login", json={"email": email, "password": "wrong-guess-x"})
+
+    main_mod._auth_limiter._hits.clear()
+    locked = client.post("/v1/auth/login",
+                         json={"email": email, "password": "original-password-1"})
+    # 429 with "too many failed attempts" is the per-account lockout (main.py maps
+    # AccountLocked to 429), not the per-IP limiter — those are different brakes
+    # that happen to share a status code.
+    assert locked.status_code == 429, \
+        f"expected the account to be locked, got {locked.status_code}: {locked.text}"
+    assert "failed attempts" in locked.json()["detail"]
+
+    main_mod._auth_limiter._hits.clear()
+    _forgot(client, email)
+    main_mod._auth_limiter._hits.clear()
+    reset = client.post("/v1/auth/password/reset", json={
+        "token": _reset_token(mailer), "new_password": "a-brand-new-password"})
+    assert reset.status_code == 200
+
+    main_mod._auth_limiter._hits.clear()
+    assert client.post("/v1/auth/login", json={
+        "email": email, "password": "a-brand-new-password"}).status_code == 200, \
+        "the lockout survived the reset"

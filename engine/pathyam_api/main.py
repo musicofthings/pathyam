@@ -15,6 +15,7 @@ come out of the engine's arithmetic.
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,11 +35,26 @@ from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
 
 from . import schemas as s
-from .auth import (AccountLocked, AuthRepository, InvalidCredentials,
+from .auth import (RESET_TTL_HOURS, AccountLocked, AuthRepository, InvalidCredentials,
                     SessionExpired)
 from .journal import (GlucoseRepository, JournalRepository, dev_identity_allowed,
                       resolve_user_id)
+from .mailer import Mailer, build_mailer
 from .ratelimit import AUTH_LIMIT, RateLimiter, RateLimitExceeded, client_address
+
+log = logging.getLogger("pathyam.api")
+
+# Built once, lazily. build_mailer() raises in production when SMTP is unconfigured,
+# and that must surface on the first reset attempt rather than at import time, so a
+# development server without SMTP still starts.
+_MAILER: Mailer | None = None
+
+
+def _mailer() -> Mailer:
+    global _MAILER
+    if _MAILER is None:
+        _MAILER = build_mailer()
+    return _MAILER
 
 def _dsn() -> str:
     dsn = os.environ.get("PATHYAM_DSN")
@@ -255,18 +271,28 @@ def current_user(
 _auth_limiter = RateLimiter(AUTH_LIMIT)
 
 
-def enforce_auth_rate_limit(request: Request) -> None:
-    """Throttle credential endpoints by client address.
-
-    Applied to login and registration only. The per-account lockout does not cover
-    password spraying — one attempt against each of many accounts never trips a
-    per-account counter — and registration is otherwise an unbounded way to create
-    rows.
-    """
-    address = client_address(
+def _client_address(request: Request) -> str:
+    """The caller's address, per ratelimit.py's trust rules."""
+    return client_address(
         peer=request.client.host if request.client else None,
         forwarded_for=request.headers.get("x-forwarded-for"),
     )
+
+
+def enforce_auth_rate_limit(request: Request) -> None:
+    """Throttle credential endpoints by client address.
+
+    Applied to login, registration and both password-reset endpoints. The per-account
+    lockout does not cover password spraying — one attempt against each of many
+    accounts never trips a per-account counter — and registration is otherwise an
+    unbounded way to create rows.
+
+    Reset needs it for two more reasons: /password/forgot sends mail to an address
+    the caller chose, which is a way to use Pathyam to spam somebody; and it is the
+    endpoint an attacker would hammer to time the difference between a known and an
+    unknown address.
+    """
+    address = _client_address(request)
     try:
         _auth_limiter.check(address)
     except RateLimitExceeded as exc:
@@ -363,6 +389,85 @@ def logout(
         user_id = svc.auth.resolve_session(token)
         return {"status": "ok", "sessions_revoked": svc.auth.logout_everywhere(user_id)}
     return {"status": "ok", "sessions_revoked": int(svc.auth.logout(token))}
+
+
+@app.post("/v1/auth/password/forgot", response_model=s.PasswordForgotResponse,
+          tags=["auth"], status_code=202,
+          dependencies=[Depends(enforce_auth_rate_limit)])
+def forgot_password(
+    req: s.PasswordForgotRequest,
+    request: Request,
+    svc: _Services = Depends(get_services),
+) -> s.PasswordForgotResponse:
+    """Start a password reset.
+
+    Always 202 with the same body, whether or not the address has an account. Any
+    variation here — a different status, a different message, an error when the
+    mail fails — turns this endpoint into a way to test whether a given person is a
+    Pathyam user, which for a diabetes app is a disclosure worth avoiding.
+
+    A known timing caveat, stated rather than papered over: sending the mail takes
+    longer than not sending it, so a determined attacker can still distinguish the
+    two by response time. Closing that properly means queueing the send and
+    returning immediately, which is the right fix when there is a queue to put it
+    in. Rate limiting on this endpoint keeps the attack expensive meanwhile.
+    """
+    issued = svc.auth.create_password_reset(
+        req.email, requested_ip=_client_address(request))
+
+    if issued is not None:
+        _, token = issued
+        try:
+            _send_reset_email(req.email, token)
+        except Exception:
+            # Never surfaced. A mail failure reported here would answer the very
+            # question this endpoint refuses to answer.
+            log.exception("password reset mail failed to send")
+
+    return s.PasswordForgotResponse()
+
+
+def _send_reset_email(to: str, token: str) -> None:
+    """The message. Plain text, one link, no tracking."""
+    base = os.environ.get("PATHYAM_APP_URL", "").strip().rstrip("/")
+    link = f"{base}/reset?token={token}" if base else None
+    body = (
+        "Someone asked to reset the password on your Pathyam account.\n\n"
+        + (f"Open this link within {RESET_TTL_HOURS} hour(s):\n\n    {link}\n\n"
+           if link else
+           f"Use this code within {RESET_TTL_HOURS} hour(s):\n\n    {token}\n\n")
+        + "If it wasn't you, you can ignore this message — your password has not "
+          "changed, and the link can only be used once.\n"
+    )
+    _mailer().send(to=to, subject="Reset your Pathyam password", body=body)
+
+
+@app.post("/v1/auth/password/reset", response_model=s.AuthSession, tags=["auth"],
+          dependencies=[Depends(enforce_auth_rate_limit)])
+def reset_password(
+    req: s.PasswordResetRequest,
+    request: Request,
+    svc: _Services = Depends(get_services),
+) -> s.AuthSession:
+    """Redeem a reset token and sign in with the new password.
+
+    Signing the user straight in avoids a pointless round trip, and the session it
+    returns is the ONLY live one: redeeming a token revokes every other session for
+    that account. A reset commonly exists because somebody else got in, and leaving
+    their session alive would make the whole exercise cosmetic.
+    """
+    try:
+        session = svc.auth.reset_password(
+            req.token, req.new_password,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except InvalidCredentials as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return s.AuthSession(access_token=session.token, user_id=session.user_id,
+                         expires_at=session.expires_at.isoformat())
 
 
 @app.get("/v1/auth/me", tags=["auth"])

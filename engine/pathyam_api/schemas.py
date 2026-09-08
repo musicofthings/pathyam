@@ -359,6 +359,25 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PasswordForgotRequest(BaseModel):
+    email: str
+
+
+class PasswordResetRequest(BaseModel):
+    token: str = Field(description="The token from the reset email.")
+    new_password: str = Field(min_length=10, description="At least 10 characters.")
+
+
+class PasswordForgotResponse(BaseModel):
+    # Deliberately says nothing about whether the address has an account. Varying
+    # this response — or its status code — turns the endpoint into a way to test
+    # whether a given person is a Pathyam user.
+    status: Literal["accepted"] = "accepted"
+    detail: str = (
+        "If that address has an account, a reset link is on its way."
+    )
+
+
 class AuthSession(BaseModel):
     access_token: str = Field(description="Bearer token. Shown once; not recoverable.")
     token_type: str = "bearer"

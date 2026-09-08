@@ -52,6 +52,8 @@ __all__ = [
     "hash_password",
     "verify_password",
     "SESSION_TTL_HOURS",
+    "RESET_TTL_HOURS",
+    "MIN_PASSWORD_LENGTH",
 ]
 
 # scrypt interactive-login parameters. ~32 MB and ~100 ms per hash on commodity
@@ -63,11 +65,29 @@ _SCRYPT_DKLEN = 32
 _SALT_BYTES = 16
 
 SESSION_TTL_HOURS = 24 * 14
+# Reset links live in an inbox, which is a place other people sometimes reach. An
+# hour is long enough to walk to a laptop and short enough that a stale link in a
+# mailbox is not a standing key to the account.
+RESET_TTL_HOURS = 1
+MIN_PASSWORD_LENGTH = 10
 _TOKEN_BYTES = 32
 _MAX_FAILED_ATTEMPTS = 8
 _LOCKOUT_MINUTES = 15
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validate_password(password: str) -> None:
+    """The minimum, enforced here as well as at the schema.
+
+    schemas.py sets min_length=10 on the HTTP boundary, which covers the API. This
+    guard covers everything else -- reset, and any future caller reaching the
+    repository directly -- so the rule cannot be bypassed by not going through
+    FastAPI. Registration and reset must agree, or a reset becomes the way to set a
+    password registration would have refused.
+    """
+    if len(password or "") < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
 _MIN_PASSWORD_CHARS = 10
 
 
@@ -152,6 +172,7 @@ class AuthRepository:
         email = normalise_email(email)
         if not _EMAIL_RE.match(email):
             raise ValueError("that does not look like an email address")
+        _validate_password(password)
 
         password_hash = hash_password(password)
         user_id = str(uuid.uuid4())
@@ -224,16 +245,26 @@ class AuthRepository:
                 (user_id,),
             )
 
-            token = secrets.token_urlsafe(_TOKEN_BYTES)
-            expires_at = now + _dt.timedelta(hours=SESSION_TTL_HOURS)
-            cur.execute(
-                """INSERT INTO app.user_session
-                       (user_id, token_sha256, expires_at, user_agent)
-                   VALUES (%s, %s, %s, %s)""",
-                (user_id, _token_digest(token), expires_at, user_agent),
-            )
+            session = self._mint_session(cur, user_id, user_agent)
 
         self._conn.commit()
+        return session
+
+    def _mint_session(self, cur, user_id, user_agent: str | None) -> Session:
+        """Insert a session row and return it. Caller owns the transaction.
+
+        Shared by login and password reset: redeeming a reset signs the user in, and
+        duplicating the token generation would be one more place for the two paths
+        to drift apart on TTL or token length.
+        """
+        token = secrets.token_urlsafe(_TOKEN_BYTES)
+        expires_at = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=SESSION_TTL_HOURS)
+        cur.execute(
+            """INSERT INTO app.user_session
+                   (user_id, token_sha256, expires_at, user_agent)
+               VALUES (%s, %s, %s, %s)""",
+            (user_id, _token_digest(token), expires_at, user_agent),
+        )
         return Session(user_id=str(user_id), token=token, expires_at=expires_at)
 
     # ----------------------------------------------------------- session --
@@ -282,6 +313,102 @@ class AuthRepository:
             revoked = cur.rowcount
         self._conn.commit()
         return revoked
+
+    # ---------------------------------------------------- password reset --
+
+    def create_password_reset(
+        self, email: str, *, requested_ip: str | None = None
+    ) -> tuple[str, str] | None:
+        """Issue a reset token for ``email``, or None when no such account exists.
+
+        Returns ``(user_id, token)``. The caller must NOT tell the requester which it
+        got: "if that address has an account, a link is on its way" is the same
+        sentence either way, and any variation turns this endpoint into a way to test
+        whether someone is a user.
+
+        Requesting a reset invalidates any outstanding one for that account, so an
+        attacker who requests a link first cannot keep it alive while the real owner
+        requests another.
+        """
+        normalised = normalise_email(email)
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id FROM app.user_credential WHERE email = %s",
+                (normalised,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            user_id = row[0]
+
+            cur.execute(
+                """UPDATE app.password_reset SET used_at = now()
+                    WHERE user_id = %s AND used_at IS NULL""",
+                (user_id,),
+            )
+
+            token = secrets.token_urlsafe(_TOKEN_BYTES)
+            cur.execute(
+                """INSERT INTO app.password_reset
+                       (user_id, token_sha256, expires_at, requested_ip)
+                   VALUES (%s, %s, now() + %s * interval '1 hour', %s)""",
+                (user_id, _token_digest(token), RESET_TTL_HOURS, requested_ip),
+            )
+        self._conn.commit()
+        return (str(user_id), token)
+
+    def reset_password(
+        self, token: str, new_password: str, *, user_agent: str | None = None
+    ) -> Session:
+        """Redeem a reset token, set a new password, and return a fresh session.
+
+        Four things happen together, and the last two are the point of a reset:
+
+        * the token is consumed, so the link in the inbox is spent;
+        * the password is replaced;
+        * **every live session is revoked** -- if someone else was in the account,
+          which is a common reason to reset, letting their session survive would
+          make the reset cosmetic;
+        * the failed-attempt lockout is cleared, so a user locked out by someone
+          guessing at their password can get back in by resetting it. Leaving the
+          lock in place would let an attacker deny access to an account simply by
+          guessing wrong often enough.
+        """
+        if not token:
+            raise InvalidCredentials("no reset token")
+        _validate_password(new_password)
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """UPDATE app.password_reset SET used_at = now()
+                    WHERE token_sha256 = %s
+                      AND used_at IS NULL
+                      AND expires_at > now()
+                  RETURNING user_id""",
+                (_token_digest(token),),
+            )
+            row = cur.fetchone()
+            if row is None:
+                self._conn.rollback()
+                raise InvalidCredentials("reset link is unknown, expired or already used")
+            user_id = row[0]
+
+            cur.execute(
+                """UPDATE app.user_credential
+                      SET password_hash = %s, failed_attempts = 0, locked_until = NULL
+                    WHERE user_id = %s""",
+                (hash_password(new_password), user_id),
+            )
+            cur.execute(
+                """UPDATE app.user_session SET revoked_at = now()
+                    WHERE user_id = %s AND revoked_at IS NULL""",
+                (user_id,),
+            )
+            # Minted AFTER the revoke, so the session handed back is the only live
+            # one. Minting first would revoke it immediately.
+            session = self._mint_session(cur, user_id, user_agent)
+        self._conn.commit()
+        return session
 
     # ----------------------------------------------------------- consent --
 
