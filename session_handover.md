@@ -1,7 +1,7 @@
 # Session Handover
-_Generated: 2026-09-08T06:00:00Z_
+_Generated: 2026-09-08T16:30:00Z_
 _Branch: main_
-_Trigger: usage threshold 98% (296/300 min) | Context at compact: n/a_
+_Trigger: user request — session wrap-up | Context at compact: n/a_
 _Compact count this project: 0_
 
 ---
@@ -14,44 +14,75 @@ model selection, added a research-cohort schema with a working release gate, rew
 the mobile client, wired third-party vision consent, fixed a dashboard card that
 fabricated a glucose reading, and shipped password reset.
 
-**Phase:** Post-Phase-6 follow-up. Items 10, 14, 15 done; 1 unblocked; 5 half-done.
-**Next action:** Nothing is half-edited. Pick from "Remaining Work" below.
+**Phase:** Post-Phase-6 follow-up. Items 1, 10, 14, 15 done; 5 half-done.
+**Next action:** **Billing goes active tomorrow.** Then run the live vision test —
+everything else is in place:
+
+```bash
+cd engine
+PATHYAM_PGDATA="$HOME/.pathyam/pg" PYTHONPATH=. \
+  PATHYAM_VISION_MODEL=google/gemini-3.7-flash \
+  .venv/bin/python scripts/dev_serve.py 8000
+```
+
+Then POST an image to `/v1/vision/resolve` with a bearer token and the
+`vision_third_party` consent granted. **Use a photograph of a real South Indian
+meal** — every image tested so far was synthetic, so accuracy is still unmeasured.
 
 ---
 
 ## ✅ Completed This Session
-- [x] `8fd2d47` Pool moved from module global to `app.state`, lifespans refcounted.
-- [x] `7c19b3b` Vision → OpenRouter. No default model id; catalogue is checkable
-      without an API key. Removed `MealObservation.model_version` default
-      `"gemini-3.7-flash"`.
-- [x] `a19c31e` CGMacros dev fixture + `research` schema. **Found the release gate
-      did not cover research data** — `ref.v_uncleared_values` joins only
-      `ref.composition_value`. Added `ref.v_release_blockers` unioning both.
-- [x] `81da44a` Mobile client rewritten. **It fabricated all four core claims**,
-      including computing calories client-side as
-      `label.includes('rice') ? 130 : 65`. HealthKit/Health Connect glucose sync.
-- [x] `b1e2c88` Automatic model selection, free-first. Real-catalogue traps caught:
-      Lyria music models priced at zero; `openrouter/auto` at −1/token; free models
-      with expiry dates; only 2 of 10 free vision models support structured outputs.
-- [x] `0ae23d1` `vision_third_party` consent. **Neither vision endpoint required
-      auth at all.** Six tests where there had been none.
-- [x] `53e58ce` Dashboard card fabricated a sensor reading — hardcoded
-      "Patch Connected", `default=95.0`, and the illustrative curve shown as
-      measured. Now reads `app.cgm_reading` or shows nothing.
-- [x] `7e54a0e` Password reset + `pathyam_api/mailer.py`. Console mailer refused in
-      production. Revokes all sessions, clears lockout, single-use 1h tokens.
-- [x] Merged to `main` and pushed (was 33 commits behind, on the fabricated commit).
-- [x] Ran full evals. See "Eval baseline" below.
+
+Earlier (see git log for the full set): pool scoped to the app, vision → OpenRouter,
+CGMacros + a release gate that covers it, mobile client rewritten, automatic
+free-first model selection, `vision_third_party` consent, dashboard glucose card
+fixed, password reset + mailer.
+
+Later in the session, all found by running real traffic rather than reading code:
+
+- [x] `2206f02` **Nothing read `.env`.** `.env.example` documented variables as
+      though copying it configured the app; every consumer called `os.environ.get`
+      directly. A key in `.env` produced "no API key", which reads as a bad key.
+- [x] `3e5c019` **Routers excluded from `auto`.** The first live call through
+      `openrouter/free` returned the bare string `'User Safety: safe'` instead of
+      JSON — a router's advertised capabilities do not bind the model that answers.
+- [x] `15044e3` **Aligned with the published API reference.** Read back the serving
+      model from the response (provenance); check errors *inside* choices, not only
+      at the top level; `X-OpenRouter-Title`. Corrected an overstated claim from the
+      previous commit.
+- [x] `f2869dc` **Gateway support** — `PATHYAM_VISION_BASE_URL` for OmniRoute /
+      LiteLLM / any OpenAI-compatible proxy, with `auto` refused off OpenRouter.
+- [x] `6df1156` **Dev-only enforced** — a non-OpenRouter base URL raises under
+      `PATHYAM_ENV=production`.
+- [x] *(gateway key fix)* **Stop forwarding an upstream key to a gateway.** Every
+      call through OmniRoute returned 401: the gateway holds the upstream credential
+      and has no business validating OpenRouter's key.
+- [x] `3955573` **Bound `max_tokens`.** Unset is not "no limit", it is the model's
+      65,536-token ceiling, and OpenRouter reserves credit against it — a 402 on a
+      call that would have emitted a few hundred tokens.
+
+### OmniRoute — evaluated, not adopted
+Real project (MIT, ~428 contributors, self-hostable). Ran it locally and routed a
+successful vision call through it. **Not adopted**: it ships 12 prompt-compression
+engines on by default, and this provider's system prompt carries negations
+("do NOT calculate or guess nutrient figures") that are the boundary between
+perception and the deterministic engine. Installed in the session scratchpad only;
+nothing reached the repo, and `.gitignore` now blocks a stray install.
+
+Operational notes if it is revisited: needs **Node 22 exactly** (`markAsUncloneable`
+is Node 22+, and it declares `<24.0.0`); npm blocks its native install scripts by
+default so `better-sqlite3` must be rebuilt; providers are configured through the
+dashboard, not `.env`; and it auto-discovers local Claude Code / Codex credentials.
 
 ---
 
 ## 🔄 In Progress (Exact Resume Point)
 **Branch:** `main` (and `phase1/restore-trust`, both at the same commit)
-**Last commit:** `e73ade2 docs: SMTP configuration and the reset entry in FOLLOW_UP`
+**Last commit:** `3955573 fix: bound output tokens — an unset max_tokens is the model's ceiling, not no limit`
 **Working tree:** clean, pushed to origin
 **Next immediate action:** Nothing half-done. Choose from Remaining Work.
 
-### Eval baseline (2026-09-08, 430 tests passing)
+### Eval baseline (2026-09-08, 449 tests passing)
 ```
 resolution   catalogued 100.0% · leave-one-out 88.4% (top-5 92.0%, MRR 0.899)
              global holdout 84.1% · median 3.22 ms/query
@@ -63,24 +94,23 @@ release gate 1 blocker: IFCT2017, 19,826 values
 confidence   A 19,812 · B 59 · C 77
 QC warnings  sambar_podi energy_atwater; sambar/rasam yield_plausible (pre-existing)
 benchmarks   SafetyBenchmarkSuite: 0 golden meals, run() -> None (correct — item 6)
-vision       248 image-capable, 3 free+usable; auto:free -> openrouter/free
+vision       248 image-capable, ~3 free+usable; auto:free -> a real model
+             (routers now excluded). Free tier rate-limited all day; pin a paid id.
 ```
 
 ---
 
 ## 📋 Remaining Work
-1. **Set `OPENROUTER_API_KEY`** — the only thing between here and a real vision call.
-   `PATHYAM_VISION_MODEL=auto:free` already picks a model. Read the free-tier
-   privacy warning in `.env.example` first.
+1. **Run the live vision test once billing is active** (tomorrow). Use a real meal
+   photograph — accuracy is still entirely unmeasured.
 2. **Set `SMTP_HOST`** before real users, or reset mail goes to the log.
 3. **Item 5 (yours):** the CGT tab still shows the illustrative curve, correctly
-   labelled. Keep it, hide it, or drop it.
-4. **Mobile photo screen** — `apiClient.resolveMealVision` is wired; no screen calls
-   it. Token persistence too (session is lost on restart). Never built; no lockfile.
+   labelled. Keep it, hide it, or drop it. The dashboard half is fixed.
+4. **Mobile:** photo screen (nothing calls `resolveMealVision`), token persistence,
+   and it has still never been installed or built.
 5. **Email verification at sign-up** — the other half of item 10.
-6. **Item 13, romanised resolution:** only `saaru` and `uppittu` are genuinely
-   reachable. `pulihora` is a holdout artifact, not a bug. Fixing 2 of 145 risks
-   overfitting; recommend leaving it.
+6. **Item 13:** only `saaru` and `uppittu` are genuinely reachable; `pulihora` is a
+   holdout artifact. Fixing 2 of 145 risks overfitting. Recommend leaving it.
 7. **Items 3/4/6/7/8** unchanged — need people and data, not code.
 
 ---
@@ -98,6 +128,10 @@ vision       248 image-capable, 3 free+usable; auto:free -> openrouter/free
 | Dashboard shows measured glucose or nothing | A prediction displayed as a sensor reading is worse than no reading. No fallback value | 2026-09-08 |
 | Reset revokes every session and clears the lockout | A reset usually means someone else got in; and a lockout you cannot escape is a denial-of-service | 2026-09-08 |
 | Console mailer refused in production | A reset token in a log reaches an operator, not the user — account takeover for anyone with log access | 2026-09-08 |
+| Routers excluded from automatic selection | A router's advertised capabilities do not bind the model that answers, and the choice changes per request. Explicit configuration still works | 2026-09-08 |
+| `model_version` read back from the response | The serving model is not always the one asked for; recording the request would name a router rather than a reader | 2026-09-08 |
+| Gateways are development-only, enforced | They can rewrite prompts in flight and fan out across upstreams, defeating `provider_may_train_on_input` and the consent it backs | 2026-09-08 |
+| `max_tokens` always set | Unset is the model's full output ceiling, and providers reserve credit against it | 2026-09-08 |
 
 ---
 
@@ -145,17 +179,20 @@ psql "$PATHYAM_DSN" -c "SELECT * FROM ref.v_release_blockers;"               # t
 ## 🌿 Git Context
 ```
 Branch  : main
-Commit  : e73ade2 docs: SMTP configuration and the reset entry in FOLLOW_UP
+Commit  : 3955573 fix: bound output tokens — an unset max_tokens is the model's ceiling, not no limit
 Status  : clean, pushed to origin (main and phase1/restore-trust in sync)
 ```
 
 Recent commits:
 ```
-e73ade2 docs: SMTP configuration and the reset entry in FOLLOW_UP
-7e54a0e feat: password reset — an account is no longer lost with its password
-2ed5dfd docs: record that the dashboard half of item 5 is fixed
-53e58ce fix: the dashboard reported a glucose reading nobody measured
-0ae23d1 feat: require consent before a meal photo leaves for a third party
+3955573 fix: bound output tokens — an unset max_tokens is the model's ceiling, not no limit
+ae8c2cd fix: do not forward an upstream provider's key to a gateway
+6df1156 feat: refuse a development gateway in production
+f2869dc feat: support any OpenAI-compatible gateway, OmniRoute included
+15044e3 fix: align the OpenRouter client with the published API reference
+3e5c019 fix: never auto-select a router — found by the first real vision call
+2206f02 fix: actually read .env — the file .env.example tells you to create
+d1a0c97 docs: session handover — OpenRouter, consent, dashboard fix, password reset
 ```
 
 ---
@@ -171,6 +208,11 @@ e73ade2 docs: SMTP configuration and the reset entry in FOLLOW_UP
   default branch.
 - Use `git add <paths>`, not `git add -A`.
 - `dev.sh` skips migrations when a schema exists — use `--reset` for new ones.
+- **Local AI gateways are dev-only and enforced.** Never set a non-OpenRouter
+  `PATHYAM_VISION_BASE_URL` in production; the provider raises. Gateway installs and
+  their state are gitignored — their stores hold upstream provider credentials.
+- Free OpenRouter endpoints may train on or publish inputs, and the input is a
+  photograph of someone's meal.
 
 ---
 

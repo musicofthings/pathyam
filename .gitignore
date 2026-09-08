@@ -45,3 +45,12 @@ yarn-error.log*
 
 # CGMacros research cohort — CC BY-NC-SA, fetched by engine/scripts/fetch_cgmacros.py
 .cgmacros/
+
+# Local AI gateways (OmniRoute, LiteLLM, proxies). Development only — the vision
+# provider refuses a non-OpenRouter base URL when PATHYAM_ENV=production. These
+# entries stop an install inside the repo, or its local state, ever being committed:
+# a gateway's store holds upstream provider credentials.
+.omniroute/
+omniroute/
+omni/
+*.omniroute.log

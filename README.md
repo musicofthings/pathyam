@@ -26,7 +26,13 @@ The compute core is real and tested. Several surrounding features are scaffoldin
 | **REST API** | `/v1/resolve`, `/v1/compute`, `/v1/log`, `/v1/history`, `/v1/templates`, `/v1/news/rss`, `/v1/evidence/explain`. |
 | **PubMed news feed** | Live NCBI E-utilities query — real titles, journals, dates, abstracts and PMIDs. Returns an empty feed when NCBI is unreachable. |
 | **Web UI** | Single-page app, 6 tabs, served same-origin from `pathyam_api/static/`. Relative API paths throughout. |
-| **Vision fails honestly** | No default model id, no silent mock fallback. Missing key or model → 501; upstream failure → 502. The offline mock is reachable only via `PATHYAM_MOCK_VISION` and is stamped `model_version="mock"`. |
+| **Vision fails honestly** | No default model id, no silent mock fallback. Missing key or model → 501; upstream failure → 502. The offline mock is reachable only via `PATHYAM_MOCK_VISION` and is stamped `model_version="mock"`. Verified live: given a synthetic image the model returned "No food is visible in this abstract graphic" rather than a plausible meal. |
+| **Vision model selection** | `PATHYAM_VISION_MODEL=auto:free` picks from OpenRouter's live catalogue, free first, falling back to the cheapest paid model when no free one is usable. Selection excludes models that cannot return JSON, emit non-text, carry unknowable pricing, expire within 30 days, or are routers. Check any id without a key: `python3 -m pathyam_engine.vision --list`. |
+| **Vision provenance** | `model_version` is read back from the response — the model that *answered*, which is not always the one asked for. Responses also carry `provider_may_train_on_input`, true on free endpoints, because which model runs is an operator setting a user cannot see. |
+| **Third-party vision consent** | Sending a photo out of Pathyam requires the `vision_third_party` purpose, enforced on `/v1/vision/resolve` and `/v1/perception/analyze` — both of which previously required no authentication at all. Optional, not required for service: meals can be logged as text. |
+| **Password reset** | Single-use tokens, one hour, stored as SHA-256 only. Redeeming revokes every other session and clears the lockout. `/password/forgot` returns an identical 202 whether or not the address exists. `pathyam_api/mailer.py` is stdlib SMTP and refuses the console backend when `PATHYAM_ENV=production`. |
+| **Measured glucose on the dashboard** | Reads `app.cgm_reading` or shows nothing. It previously displayed a hardcoded 95 mg/dL under a "Patch Connected" badge with no sensor attached, and filled it from the illustrative curve when meals existed. |
+| **Research cohorts** | `research.*` holds third-party CGM datasets under their own licences, separate from app user data. `ref.v_release_blockers` is the single release gate, covering composition **and** research cohorts — `ref.v_uncleared_values` alone never saw the latter. |
 | **CGM telemetry** | Readings persist to `app.cgm_reading`, idempotent on (user, reading time) so sensor resends do not double-count. `app.v_postprandial_reading` pairs each meal with the glucose that followed it. |
 | **Consent enforced at write time** | `/v1/log` requires `core_service`, `/v1/cgt/telemetry` requires `cgm_telemetry`; a write without it is 403 naming the purpose and how to grant it. `account`/`core_service` are recorded at sign-up; the optional glucose purpose is not. |
 | **Auth rate limiting** | 10 requests/min per client address on login and registration, sliding window. Covers password spraying, which the per-account lockout does not. `X-Forwarded-For` is ignored unless `PATHYAM_TRUSTED_PROXY_HOPS` is set — trusting it blindly removes the limiter rather than weakening it. |
@@ -40,16 +46,16 @@ These are **not** working. They exist in the codebase and have endpoints, which 
 
 | Gap | What actually happens | Planned |
 |---|---|---|
-| **Meal photo vision — unverified end to end** | The provider now fails loudly instead of faking, but no live call has been made from this repo: there is no API key here, so `PATHYAM_VISION_MODEL` has never been exercised against a real model. Set a key and a model id you have confirmed with `client.models.list()`, then verify before trusting it. | Phase 4 |
+| **Meal photo vision — no accuracy measurement** | Live calls now work: a real image round-trips through OpenRouter and returns a schema-valid observation. What is unverified is *accuracy* — every image tested so far was synthetic, and the model correctly declined to identify food in them. Nothing has been run against a photograph of an actual meal. | Phase 4 |
 | **Portion accuracy is unmeasured** | No golden meal dataset exists, so portion MAPE and nutrient error are unknown. Vision output must not be presented as accurate until ≥50 photographed meals with weighed component masses are collected. | Phase 4 |
-| **No password reset or email verification** | Both need somewhere to send mail, which this deployment does not have. An account whose password is forgotten is unrecoverable. | Phase 6 |
+| **No email verification** | Sign-up does not verify the address. Password reset itself now works — see above — but an unverified address can be registered. | Phase 6 |
 | **Rate limiting is per process** | The per-IP limit on credential endpoints is in-process, so N workers give an attacker N buckets, and it cannot shed load before a request is parsed. Real limiting belongs at the edge; this is defence in depth, not the answer. | Phase 6 |
 | **No semantic retrieval** | One arm: PostgreSQL full-text search. There is no embedding column and no pgvector, because that needs a provider this repo has no credentials for. `reciprocal_rank_fusion` is correct but unused — there is nothing to fuse. | Phase 5 |
 | **Corpus is query-derived, not systematic** | 42 documents from seven curated PubMed queries recorded on each row. A starting point for this domain, not a systematic review, and it inherits whatever those queries miss. | Phase 5 |
 | **CGT curve is illustrative, not predictive** | Relabelled rather than sourced: the coefficients could not be cited because they are not published values. Glycemic load is standard; the fat and fibre adjustments are directionally supported but their magnitudes are tuning. Every response carries `is_validated: false` and a disclaimer, and the UI renders it. Making it real needs paired CGM traces and weighed meal records. | Phase 6 |
 | **CGT model is unfitted** | Glucose readings are now stored and pair back to meals via `/v1/cgt/postprandial/{meal_log_id}`, so the data needed to fit the curve can be collected. Nothing fits against it yet — the predicted curve and the measured trace sit side by side, uncompared. | Phase 6 |
 | **Safety benchmarks** | The suite computes correctly, but **no golden meal dataset exists** — the only samples are two synthetic rows in a unit test. It has nothing to measure. | Phase 4 |
-| **Mobile app** | `apps/mobile` has never been installed or built and has no lockfile. Expo 51 / React Native 0.74. | Phase 6 |
+| **Mobile app** | Rewritten with real API calls, bearer auth and HealthKit / Health Connect glucose sync, and it typechecks under `--strict`. But it has still **never been installed or built**, has no lockfile, and is on Expo 51 / React Native 0.74. No screen calls the photo path, and the session is lost on restart. See `apps/mobile/README.md`. | Phase 6 |
 
 ---
 
@@ -142,7 +148,7 @@ The separation between resolution and computation is load-bearing: `/v1/resolve`
 ./engine/run_tests.sh
 ```
 
-Current result: **283 tests passing** — 217 unit, 66 integration/API. The integration suite seeds a throwaway Postgres from `db/` via `pgserver`; no Docker and no root required.
+Current result: **449 tests passing** — 335 unit, 114 integration/API. The integration suite seeds a throwaway Postgres from `db/` via `pgserver`; no Docker and no root required.
 
 ### Development server
 
@@ -154,7 +160,36 @@ Serves on `http://127.0.0.1:8000/`. No authentication, no rate limiting, no requ
 
 ### Configuration
 
-Copy `.env.example` to `.env`. `ALLOWED_ORIGINS` is required in production: when it is unset and `PATHYAM_ENV != development`, the CORS allowlist is **empty**, not `*`. Credentials are enabled, so a wildcard is never valid.
+Copy `.env.example` to `.env`. It is read at startup by `pathyam_api/envfile.py` — until recently nothing loaded it, so the documented setup silently did nothing. An already-exported variable always wins, so a stale file cannot override a deliberate export or a container's environment.
+
+`ALLOWED_ORIGINS` is required in production: when it is unset and `PATHYAM_ENV != development`, the CORS allowlist is **empty**, not `*`. Credentials are enabled, so a wildcard is never valid.
+
+**Vision.** Set `OPENROUTER_API_KEY` and leave `PATHYAM_VISION_MODEL=auto:free`. Inspect the catalogue without a key:
+
+```bash
+cd engine
+PYTHONPATH=. python3 -m pathyam_engine.vision --list        # usable models, free first
+PYTHONPATH=. python3 -m pathyam_engine.vision --select free # what auto would pick
+PYTHONPATH=. python3 -m pathyam_engine.vision <model-id>    # check one id
+```
+
+Free vision models on OpenRouter are persistently rate-limited in practice; pin a paid id such as `google/gemini-3.7-flash` (~$0.003/photo) for anything you need to rely on. Free endpoints may also train on or publish their inputs, and the input here is a photograph of someone's meal — `provider_may_train_on_input` reports it per response, and `.env.example` has the detail.
+
+**Local AI gateways are development-only, and that is enforced.** `PATHYAM_VISION_BASE_URL` points the vision provider at any OpenAI-compatible gateway — OmniRoute, LiteLLM, a proxy:
+
+```bash
+PATHYAM_VISION_BASE_URL=http://localhost:20128/v1   # OmniRoute
+PATHYAM_VISION_MODEL=openrouter/google/gemini-3.7-flash
+```
+
+A non-OpenRouter base URL **raises when `PATHYAM_ENV=production`**, so an env var surviving a promotion cannot route users' photographs through a dev gateway. Two further constraints, both deliberate:
+
+- `auto` is refused off OpenRouter. Selection ranks on OpenRouter's pricing, modality and capability fields; another gateway's `/models` does not carry them, and ranking absent fields would pick badly in silence.
+- **Disable prompt compression on the gateway for this route.** Gateways that rewrite prompts in flight — OmniRoute ships 12 engines on by default — can drop the system prompt's negations ("do NOT calculate or guess nutrient figures"), which are the boundary between perception and the deterministic engine. Nothing on this side can detect a paraphrased instruction.
+
+Gateway installs and their local state are gitignored: a gateway's store holds upstream provider credentials and must never reach the repository.
+
+**Mail.** Password reset needs `SMTP_HOST`. Without it, development uses a console mailer that writes the message to the log and sends nothing — and `build_mailer()` refuses that backend when `PATHYAM_ENV=production`, because a reset token in a log reaches an operator instead of the user.
 
 ---
 
