@@ -157,9 +157,33 @@ CRITICAL RULES:
 
 
 def _base_url() -> str:
-    return (os.environ.get(_GATEWAY_ENV, "").strip()
-            or os.environ.get(_BASE_ENV, "").strip()
-            or _DEFAULT_BASE_URL)
+    """The endpoint to call, with a production guard on gateway overrides.
+
+    A compatible gateway is a development convenience: it can rewrite prompts in
+    flight (see GATEWAY_COMPRESSION_WARNING), and its fallback across many upstream
+    providers makes it hard to say which vendor received a given user's photograph
+    -- which is precisely what `provider_may_train_on_input` and the
+    `vision_third_party` consent purpose exist to state honestly.
+
+    So an override is refused when PATHYAM_ENV=production. Failing at the first call
+    is better than a deployment that silently routes patient meal photographs
+    through a dev gateway because an env var survived a promotion. Same shape as the
+    mailer refusing the console backend in production.
+    """
+    override = (os.environ.get(_GATEWAY_ENV, "").strip()
+                or os.environ.get(_BASE_ENV, "").strip())
+    if not override:
+        return _DEFAULT_BASE_URL
+
+    if (os.environ.get("PATHYAM_ENV", "development") == "production"
+            and not is_openrouter(override)):
+        raise VisionNotConfigured(
+            f"{override!r} is a development gateway and PATHYAM_ENV=production. "
+            "Gateways may rewrite prompts in flight and fan out across upstream "
+            "providers, so the app cannot say which vendor received a user's "
+            f"photograph. Unset {_GATEWAY_ENV} and point at OpenRouter directly."
+        )
+    return override
 
 
 def is_openrouter(base_url: str) -> bool:

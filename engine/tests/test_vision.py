@@ -611,3 +611,24 @@ def test_the_compression_hazard_is_stated_where_an_operator_will_meet_it():
     assert "compression" in w
     assert "not calculate" in w or "do not calculate" in w
     assert "cannot be detected" in w
+
+
+def test_a_development_gateway_is_refused_in_production(monkeypatch):
+    """Dev-only means enforced, not documented.
+
+    An env var surviving a promotion to production would silently route users' meal
+    photographs through a gateway that can rewrite the prompt and fan out across
+    upstream providers — defeating both provider_may_train_on_input and the
+    vision_third_party consent it backs.
+    """
+    monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "http://localhost:20128/v1")
+    monkeypatch.setenv("PATHYAM_ENV", "production")
+    with pytest.raises(VisionNotConfigured, match="development gateway"):
+        op._base_url()
+
+
+def test_pointing_at_openrouter_explicitly_is_fine_in_production(monkeypatch):
+    """The guard is about gateways, not about overriding the URL."""
+    monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("PATHYAM_ENV", "production")
+    assert op._base_url() == "https://openrouter.ai/api/v1"
