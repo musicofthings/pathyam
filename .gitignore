@@ -42,3 +42,6 @@ yarn-error.log*
 .devdata/
 *.log
 
+
+# CGMacros research cohort — CC BY-NC-SA, fetched by engine/scripts/fetch_cgmacros.py
+.cgmacros/

@@ -300,3 +300,125 @@ def test_every_corpus_document_carries_an_identifier(conn):
                 WHERE pmid IS NULL AND doi IS NULL AND guideline_ref IS NULL"""
         )
         assert cur.fetchone()[0] == 0
+
+
+# ------------------------------------------- research cohorts + release gate ----
+#
+# db/018. The point of these is the compliance boundary, not the ingest: a
+# NonCommercial research dataset must be visible to the release gate and must never
+# be mixed with app.* user data.
+
+
+def _load_cgmacros_fixture(conn, tmp_path):
+    """Two participants' worth of synthetic rows, real column names."""
+    from pathyam_engine.authoring.cgmacros import load_cgmacros_into_postgres
+
+    header = ("Timestamp,Libre GL,Dexcom GL,HR,Calories (Activity),Mets,Meal Type,"
+              "Calories,Carbs,Protein,Fat,Fiber,Amount Consumed,Image Path")
+    for n in (1, 2):
+        (tmp_path / f"CGMacros-00{n}.csv").write_text(
+            header + "\n"
+            "01/02/2021 12:30,140,145,70,2.0,12,Lunch,620,75,28,22,9,100,p.jpg\n"
+            "01/02/2021 12:45,165,170,72,2.0,12,,,,,,,,\n"
+            "01/02/2021 13:30,150,152,70,2.0,12,,,,,,,,\n"
+            "01/02/2021 18:00,110,112,68,1.5,11,,,,,,,,\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "bio.csv").write_text(
+        "Age,Gender,BMI,Self-identify ,A1c PDL (Lab),Fasting GLU - PDL (Lab)\n"
+        "34,F,27.4,Hispanic/Latino,5.9,104\n"
+        "58,M,31.2,White,7.1,141\n",
+        encoding="utf-8",
+    )
+    return load_cgmacros_into_postgres(tmp_path, conn, dry_run=False)
+
+
+def test_a_noncommercial_research_cohort_reaches_the_release_gate(conn, tmp_path):
+    """The gap this schema was written to close.
+
+    ref.v_uncleared_values only ever joined ref.composition_value, so a research
+    dataset registered with is_commercial_cleared = false was invisible to it: the
+    flag was set correctly and checked nowhere. ref.v_release_blockers unions both
+    asset classes, and this asserts CGMacros actually appears there.
+    """
+    result = _load_cgmacros_fixture(conn, tmp_path)
+    assert result.subjects == 2
+    # 2 participants x 4 timestamps x 2 sensors.
+    assert result.readings == 16
+    assert result.meals == 2
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT source_key, licence, row_count, detail "
+            "  FROM ref.v_release_blockers WHERE asset = 'research_cohort'")
+        rows = cur.fetchall()
+
+    assert rows, "the cohort did not reach the release gate"
+    source_key, licence, row_count, detail = rows[0]
+    assert source_key == "CGMACROS-1.0.0"
+    assert "NonCommercial" in licence
+    assert row_count > 0
+    assert "none South Asian" in detail, \
+        "the gate must show why the cohort does not transfer, not just that it is uncleared"
+
+
+def test_the_cohort_is_never_written_into_app_user_data(conn, tmp_path):
+    """Research participants consented to a different study, years ago.
+
+    Loading them as app.app_user rows would manufacture users who agreed to nothing
+    here, and would either bypass the consent check added in db/017 or require
+    forging consent rows.
+    """
+    before = _count(conn, "SELECT count(*) FROM app.app_user")
+    _load_cgmacros_fixture(conn, tmp_path)
+
+    assert _count(conn, "SELECT count(*) FROM app.app_user") == before
+    assert _count(conn, "SELECT count(*) FROM app.cgm_reading") == 0
+    assert _count(conn, "SELECT count(*) FROM research.cgm_reading") > 0
+
+
+def test_the_dataset_row_declares_that_portions_were_not_weighed(conn, tmp_path):
+    """Stops CGMacros being mistaken for the golden meal set.
+
+    Its portion field is a percentage estimated from photographs. The golden meal
+    set exists because portion accuracy needs weighed component masses.
+    """
+    _load_cgmacros_fixture(conn, tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("""SELECT portions_are_weighed, timestamps_are_shifted
+                         FROM research.dataset WHERE dataset_key = 'CGMACROS-1.0.0'""")
+        weighed, shifted = cur.fetchone()
+    assert weighed is False
+    assert shifted is True
+
+
+def test_postprandial_pairing_works_on_the_research_cohort(conn, tmp_path):
+    """The reason to load this at all: app.v_postprandial_reading had never run
+    against real traces. The research view is the same shape and same rules."""
+    _load_cgmacros_fixture(conn, tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("""SELECT sensor, minutes_since_meal, glucose_mg_dl
+                         FROM research.v_postprandial_reading
+                        WHERE dataset_key = 'CGMACROS-1.0.0'
+                        ORDER BY sensor, minutes_since_meal""")
+        rows = cur.fetchall()
+
+    assert rows, "no readings paired to a meal"
+    # The 18:00 reading is 5.5 h after the 12:30 lunch and must fall outside the 3 h window.
+    assert all(0 <= minutes < 180 for _s, minutes, _g in rows)
+    assert {r[0] for r in rows} == {"Dexcom G6 Pro", "FreeStyle Libre Pro"}
+
+
+def test_a_re_run_updates_rather_than_duplicating(conn, tmp_path):
+    """A doubled reading silently biases any curve fitted from the table — the
+    failure the IFCT loader hit across a date boundary."""
+    _load_cgmacros_fixture(conn, tmp_path)
+    after_first = _count(conn, "SELECT count(*) FROM research.cgm_reading")
+    _load_cgmacros_fixture(conn, tmp_path)
+    assert _count(conn, "SELECT count(*) FROM research.cgm_reading") == after_first
+
+
+def _count(conn, sql: str) -> int:
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        return cur.fetchone()[0]

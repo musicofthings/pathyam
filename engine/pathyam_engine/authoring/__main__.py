@@ -12,6 +12,7 @@ from .audit import audit as run_audit
 from .lexicon import load_lexicon_file, load_lexicon_into_postgres
 from .derived_foods import load_derived_foods
 from .evidence_corpus import build_corpus_from_pubmed
+from .cgmacros import load_cgmacros_into_postgres
 from .ifct2017 import load_ifct_into_postgres
 from .loader import load_into_postgres
 from .schema import load_library
@@ -112,6 +113,38 @@ def cmd_ifct(args) -> int:
     else:
         print("\n  Values loaded under source IFCT2017, is_commercial_cleared = false.")
         print("  They will appear in ref.v_uncleared_values until ICMR-NIN permission lands.")
+    return 0
+
+
+def cmd_cgmacros(args) -> int:
+    """Ingest the CGMacros research cohort into the research schema.
+
+    Development fixture. It exercises the postprandial pipeline against real traces;
+    it is not a substitute for Pathyam's own participants, and the coefficients that
+    ship must not be fitted on it — see pathyam_engine/authoring/cgmacros.py.
+    """
+    import psycopg
+
+    root = Path(args.dir)
+    if not root.exists():
+        raise SystemExit(
+            f"{root} not found — run `python3 scripts/fetch_cgmacros.py` first.\n"
+            "CGMacros is CC BY-NC-SA and is fetched, not vendored."
+        )
+
+    with psycopg.connect(args.dsn) as conn:
+        result = load_cgmacros_into_postgres(
+            root, conn, dry_run=args.dry_run, limit_subjects=args.limit_subjects)
+
+    print(json.dumps(result.as_dict(), indent=2))
+    if args.dry_run:
+        print("\n(dry run — rolled back)")
+    else:
+        print("\n  Loaded under source CGMACROS-1.0.0, is_commercial_cleared = false.")
+        print("  It will appear in ref.v_release_blockers. CC BY-NC-SA: NonCommercial,")
+        print("  and ShareAlike may extend to anything fitted on it.")
+        print("  Cohort is Californian and the meals are not South Indian — this data")
+        print("  validates the pipeline, it does not fit the model.")
     return 0
 
 
@@ -229,6 +262,16 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--dry-run", action="store_true")
     i.set_defaults(func=cmd_ifct)
 
+    c = sub.add_parser("cgmacros",
+                       help="ingest the CGMacros research cohort (dev fixture, CC BY-NC-SA)")
+    c.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
+    c.add_argument("--dir", default=str(
+        Path(__file__).resolve().parents[2] / ".cgmacros"))
+    c.add_argument("--limit-subjects", type=int, default=None,
+                   help="load only the first N participants (the full set is large)")
+    c.add_argument("--dry-run", action="store_true")
+    c.set_defaults(func=cmd_cgmacros)
+
     d = sub.add_parser("derived",
                        help="fill composition for foods absent from IFCT 2017")
     d.add_argument("--dsn", default=os.environ.get("PATHYAM_DSN"))
@@ -250,7 +293,8 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=cmd_audit)
 
     args = parser.parse_args(argv)
-    if args.command in {"load", "audit", "ifct", "derived", "evidence"} and not args.dsn:
+    if args.command in {"load", "audit", "ifct", "cgmacros", "derived", "evidence"} \
+            and not args.dsn:
         parser.error("no DSN: pass --dsn or set PATHYAM_DSN")
     return args.func(args)
 
