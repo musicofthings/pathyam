@@ -561,3 +561,53 @@ def test_the_attribution_header_uses_the_documented_name(monkeypatch):
 
     assert captured["headers"].get("X-openrouter-title".lower()) == "Pathyam"
     assert captured["headers"].get("Http-referer".lower())
+
+
+# ------------------------------------------- compatible gateways (OmniRoute) ----
+#
+# The provider speaks OpenAI-compatible chat/completions, so any gateway serving
+# that shape works — OmniRoute (self-hosted, localhost:20128/v1), LiteLLM, a proxy.
+# What does NOT transfer is OpenRouter's catalogue, which is what auto-selection
+# ranks on.
+
+
+def test_a_gateway_base_url_overrides_openrouter(monkeypatch):
+    monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "http://localhost:20128/v1")
+    assert op._base_url() == "http://localhost:20128/v1"
+    assert not op.is_openrouter(op._base_url())
+
+
+def test_auto_is_refused_off_openrouter(monkeypatch):
+    """Selection ranks on OpenRouter's pricing, modality and capability fields.
+
+    A compatible gateway's /models does not carry them, and ranking absent fields
+    would pick badly in silence rather than fail. Requiring an explicit id is the
+    honest outcome.
+    """
+    monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "http://localhost:20128/v1")
+    with pytest.raises(VisionNotConfigured, match="needs OpenRouter's catalogue"):
+        op.resolve_model("auto:free", today=TODAY)
+
+
+def test_an_explicit_id_on_a_gateway_is_trusted_and_assumes_the_weaker_json_mode(monkeypatch):
+    """Absence from a gateway's catalogue proves nothing about the model.
+
+    json_object is assumed rather than json_schema: asking for a strict schema where
+    it is unsupported is an error, not a graceful downgrade.
+    """
+    monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "http://localhost:20128/v1")
+    monkeypatch.setattr(op, "_get_json", lambda url, **kw: {"data": []})
+
+    model, why = op.resolve_model("some-provider/some-model", today=TODAY)
+    assert model.id == "some-provider/some-model"
+    assert model.response_format_mode == "json_object"
+    assert "non-OpenRouter gateway" in why
+
+
+def test_the_compression_hazard_is_stated_where_an_operator_will_meet_it():
+    """A gateway that paraphrases the prompt in flight can drop the negations that
+    separate perception from computation, and the client cannot detect it."""
+    w = op.GATEWAY_COMPRESSION_WARNING.lower()
+    assert "compression" in w
+    assert "not calculate" in w or "do not calculate" in w
+    assert "cannot be detected" in w

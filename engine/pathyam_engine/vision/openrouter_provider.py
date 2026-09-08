@@ -76,6 +76,8 @@ _MODEL_ENV = "PATHYAM_VISION_MODEL"
 _MOCK_ENV = "PATHYAM_MOCK_VISION"
 _KEY_ENV = "OPENROUTER_API_KEY"
 _BASE_ENV = "OPENROUTER_BASE_URL"
+# Generic override, for any OpenAI-compatible gateway (OmniRoute, LiteLLM, a proxy).
+_GATEWAY_ENV = "PATHYAM_VISION_BASE_URL"
 
 _DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -155,7 +157,47 @@ CRITICAL RULES:
 
 
 def _base_url() -> str:
-    return os.environ.get(_BASE_ENV, "").strip() or _DEFAULT_BASE_URL
+    return (os.environ.get(_GATEWAY_ENV, "").strip()
+            or os.environ.get(_BASE_ENV, "").strip()
+            or _DEFAULT_BASE_URL)
+
+
+def is_openrouter(base_url: str) -> bool:
+    """Whether this endpoint is OpenRouter itself, rather than a compatible gateway.
+
+    Automatic selection reads OpenRouter's own catalogue fields -- `pricing`,
+    `architecture.input_modalities`, `supported_parameters`, `expiration_date`. A
+    different gateway serving /models will not carry the same shape, and ranking
+    absent fields would silently pick badly rather than fail. So `auto` is refused
+    off-OpenRouter and an explicit model id is required.
+    """
+    return "openrouter.ai" in base_url
+
+
+# A gateway that rewrites the prompt in flight is a specific hazard for this module,
+# not a general one, and it is worth naming because the feature is usually on by
+# default and advertised as transparent.
+#
+# Two things in every request here are load-bearing and would not survive being
+# paraphrased. The system prompt says "Do NOT calculate or guess nutrient figures"
+# and "Do not substitute a plausible South Indian dish for one you cannot actually
+# see". Those negations are the architectural boundary of the whole system -- the
+# model perceives, the deterministic engine computes -- and rule-based prose
+# compression is exactly the technique most likely to drop a negation. The other is
+# MEAL_EXTRACTION_SCHEMA, which on a json_object model travels in the prompt as its
+# only description of the contract.
+#
+# OmniRoute (github.com/diegosouzapw/OmniRoute) documents preservation guards and
+# per-step fidelity gates for structured content, and a passthrough profile. Use
+# them: point PATHYAM_VISION_BASE_URL at it with compression disabled for this
+# route. Nothing here can detect a paraphrased instruction, so this is a
+# configuration requirement, not something the client can enforce.
+GATEWAY_COMPRESSION_WARNING = (
+    "This provider's system prompt carries negative instructions ('do NOT calculate "
+    "nutrients', 'do not substitute a dish you cannot see') that are the boundary "
+    "between perception and computation. Disable prompt compression on the gateway "
+    "for this route; a paraphrase that drops a negation cannot be detected here."
+)
 
 
 def _get_json(url: str, *, timeout: float, headers: dict[str, str] | None = None) -> Any:
@@ -411,10 +453,38 @@ def resolve_model(
     catalogue. Anything else is treated as an explicit id and verified against the
     catalogue -- automatic selection never silently overrides an operator's choice.
     """
-    catalogue = fetch_catalogue(timeout=timeout)
     spec = spec.strip()
+    on_openrouter = is_openrouter(_base_url())
+
+    # Short-circuit before any network call. Off OpenRouter there is no catalogue
+    # worth fetching: `auto` cannot rank without its fields, and an explicit id
+    # cannot be verified against a different gateway's /models.
+    if not on_openrouter:
+        if spec == "auto" or spec.startswith("auto:"):
+            raise VisionNotConfigured(
+                f"{spec!r} needs OpenRouter's catalogue: selection ranks on its "
+                "pricing, modality and capability fields, which a compatible "
+                f"gateway does not carry. Set {_MODEL_ENV} to an explicit model id "
+                f"when {_GATEWAY_ENV} points elsewhere."
+            )
+        return (
+            VisionModel(id=spec, name=spec, context_length=0,
+                        prompt_price=0.0, completion_price=0.0, image_price=0.0,
+                        supports_structured_outputs=False,
+                        supports_response_format=True, expires_on=None),
+            f"configured explicitly on a non-OpenRouter gateway: {spec}",
+        )
+
+    catalogue = fetch_catalogue(timeout=timeout)
 
     if spec == "auto" or spec.startswith("auto:"):
+        if not on_openrouter:
+            raise VisionNotConfigured(
+                f"{spec!r} needs OpenRouter's catalogue: selection ranks on its "
+                "pricing, modality and capability fields, which a compatible "
+                f"gateway does not carry. Set {_MODEL_ENV} to an explicit model id "
+                f"when {_GATEWAY_ENV} points elsewhere."
+            )
         prefer = spec.split(":", 1)[1] if ":" in spec else PREFER_FREE
         chosen = select_vision_model(catalogue, prefer=prefer, today=today)
         tier = "free" if chosen.is_free else f"${chosen.cost_per_meal_usd():.4f}/meal (est.)"

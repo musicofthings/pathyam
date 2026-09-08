@@ -1,6 +1,7 @@
 """Pathyam Vision Engine Package."""
 
-from .openrouter_provider import (FREE_TIER_WARNING, MOCK_MODEL_VERSION,
+from .openrouter_provider import (FREE_TIER_WARNING, GATEWAY_COMPRESSION_WARNING,
+                                  MOCK_MODEL_VERSION, is_openrouter,
                                   PREFER_ANY, PREFER_CHEAPEST, PREFER_FREE,
                                   OpenRouterVisionProvider, VisionError,
                                   VisionModel, VisionModelUnavailable,
@@ -26,6 +27,8 @@ __all__ = [
     "VisionModel",
     "MOCK_MODEL_VERSION",
     "FREE_TIER_WARNING",
+    "GATEWAY_COMPRESSION_WARNING",
+    "is_openrouter",
     "PREFER_FREE",
     "PREFER_CHEAPEST",
     "PREFER_ANY",
