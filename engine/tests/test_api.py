@@ -863,3 +863,125 @@ def test_the_rate_limit_does_not_block_ordinary_api_use(client):
             assert response.status_code == 200
     finally:
         _auth_limiter.reset()
+
+
+# ------------------------------------------------- third-party vision consent ----
+#
+# Both vision endpoints send a photograph the user took of their own meal out of
+# Pathyam to an external model provider. Until db/019 neither required
+# authentication at all, so there was no subject whose consent could be checked and
+# nothing recorded that the photo had left the system.
+#
+# These run with PATHYAM_MOCK_VISION so no network call happens. The mock is
+# labelled model_version="mock" and never leaves the process, which is exactly why
+# it is safe to use to test the gate that guards real disclosure.
+
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 4000
+
+
+@pytest.fixture
+def mock_vision(monkeypatch):
+    monkeypatch.setenv("PATHYAM_MOCK_VISION", "1")
+    yield
+
+
+def test_a_meal_photo_is_refused_without_vision_consent(client, mock_vision):
+    """core_service is not enough: this sends the photo to a third party."""
+    user = "d0000000-0000-0000-0000-0000000000e1"
+    _consent(client, user, "core_service")
+
+    refused = client.post(
+        "/v1/vision/resolve",
+        files={"file": ("meal.jpg", _JPEG, "image/jpeg")},
+        headers={"X-Pathyam-User": user},
+    )
+    assert refused.status_code == 403
+    detail = refused.json()["detail"]
+    assert detail["purpose"] == "vision_third_party"
+    assert detail["grant_with"] == "POST /v1/auth/consent/vision_third_party"
+
+
+def test_a_meal_photo_is_accepted_once_vision_consent_is_granted(client, mock_vision):
+    user = "d0000000-0000-0000-0000-0000000000e2"
+    _consent(client, user, "core_service", "vision_third_party")
+
+    accepted = client.post(
+        "/v1/vision/resolve",
+        files={"file": ("meal.jpg", _JPEG, "image/jpeg")},
+        headers={"X-Pathyam-User": user},
+    )
+    assert accepted.status_code == 200, accepted.text
+    body = accepted.json()
+    assert body["model_version"] == "mock", "the mock must stay identifiable in the response"
+    # The mock never leaves this process, so nothing was disclosed to anyone.
+    assert body["provider_may_train_on_input"] is False
+
+
+def test_perception_analyze_is_gated_by_the_same_purpose(client, mock_vision):
+    """The other way an image reaches a provider. Gating one and not the other
+    would leave the disclosure reachable through a different door."""
+    import base64
+
+    user = "d0000000-0000-0000-0000-0000000000e3"
+    _consent(client, user, "core_service")
+    payload = {"image_base64": base64.b64encode(_JPEG).decode()}
+
+    refused = client.post("/v1/perception/analyze", json=payload,
+                          headers={"X-Pathyam-User": user})
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["purpose"] == "vision_third_party"
+
+    _consent(client, user, "vision_third_party")
+    assert client.post("/v1/perception/analyze", json=payload,
+                       headers={"X-Pathyam-User": user}).status_code == 200
+
+
+def test_vision_requires_authentication_at_all(client, mock_vision, monkeypatch):
+    """The endpoint used to take no user. Anyone who could reach it could have a
+    photograph forwarded to a third party with no subject and no record."""
+    monkeypatch.setenv("PATHYAM_ALLOW_DEV_IDENTITY", "0")
+
+    anonymous = client.post(
+        "/v1/vision/resolve",
+        files={"file": ("meal.jpg", _JPEG, "image/jpeg")},
+    )
+    assert anonymous.status_code == 401
+
+
+def test_signing_up_does_not_grant_vision_consent(client, mock_vision):
+    """Optional and sensitive, like cgm_telemetry. Sign-up covers neither."""
+    session = client.post("/v1/auth/register", json={
+        "email": "vision-consent@example.com",
+        "password": "a-sufficiently-long-password",
+    }).json()
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    assert client.post("/v1/log", json={"text": "2 idli", "n_samples": 120},
+                       headers=auth).status_code == 200
+    refused = client.post("/v1/vision/resolve",
+                          files={"file": ("meal.jpg", _JPEG, "image/jpeg")},
+                          headers=auth)
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["purpose"] == "vision_third_party"
+
+
+def test_vision_consent_is_registered_as_optional_not_required(client):
+    """Consent that must be given to use the product at all is not freely given.
+
+    Meals can be logged as text, so photography is a convenience on top and the
+    purpose is optional.
+    """
+    import psycopg
+
+    with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT is_required_for_service, description_en
+                         FROM app.consent_purpose
+                        WHERE purpose_key = 'vision_third_party'""")
+        row = cur.fetchone()
+
+    assert row is not None, "db/019 did not register the purpose"
+    required, description = row
+    assert required is False
+    # The notice has to say the photo leaves Pathyam; that is the whole disclosure.
+    assert "leaves Pathyam" in description
+    assert "text instead" in description

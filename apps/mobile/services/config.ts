@@ -29,3 +29,5 @@ export function apiBaseUrl(): string {
 }
 
 export const CONSENT_CGM_TELEMETRY = 'cgm_telemetry';
+/** Sending a meal photograph out of Pathyam to an external model provider. */
+export const CONSENT_VISION_THIRD_PARTY = 'vision_third_party';

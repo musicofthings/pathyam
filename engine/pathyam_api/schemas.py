@@ -477,6 +477,15 @@ class VisionQualityGateOut(BaseModel):
 class VisionResolveResponse(BaseModel):
     quality_gate: VisionQualityGateOut
     observations: list[VisionObservationItem]
-    model_version: str = "gemini-3.7-flash"
+    # Required, no default. It used to default to "gemini-3.7-flash" — a model that
+    # did not exist when that default was written — so a response assembled without
+    # one claimed a provenance nothing had.
+    model_version: str = Field(description="The model that actually read the photograph.")
+    # Whether that model was a free endpoint. Free OpenRouter endpoints may train on
+    # or publish their inputs; which model runs is an operator setting the user
+    # cannot see, and they cannot consent to a fact withheld from them.
+    provider_may_train_on_input: bool = Field(
+        description="True when a free endpoint read the photo. Free providers may "
+                    "train on or publish what they receive.")
 
 

@@ -28,7 +28,7 @@ from pathyam_engine import ComputeEngine, EngineError, Prior, PostgresRepository
 from pathyam_engine.distributions import PriorError
 from pathyam_engine.expressions import ExpressionError
 from pathyam_engine.resolution import DishResolver, PostgresCandidateSource
-from pathyam_engine.vision import (OpenRouterVisionProvider, VisionError,
+from pathyam_engine.vision import (MOCK_MODEL_VERSION, OpenRouterVisionProvider, VisionError,
                                    VisionNotConfigured, evaluate_image_quality)
 from pathyam_engine.evidence import EvidenceEngine, NCBIClient
 from pathyam_engine.evidence.hybrid_retrieval import PostgresEvidenceRetriever
@@ -474,8 +474,17 @@ async def resolve_meal_vision(
     file: UploadFile = File(...),
     region_key: str | None = Form(default=None),
     svc: _Services = Depends(get_services),
+    user_id: str = Depends(current_user),
 ) -> s.VisionResolveResponse:
-    """Analyse a meal photo through the configured VLM, then resolve each item."""
+    """Analyse a meal photo through the configured VLM, then resolve each item.
+
+    Requires `vision_third_party`: this sends the user's photograph out of Pathyam
+    to an external provider. The endpoint previously required no authentication at
+    all, so anyone who could reach it could have a photo forwarded to a third party
+    with no subject, no consent and no record.
+    """
+    require_consent(svc, user_id, "vision_third_party")
+
     image_bytes = await file.read()
 
     # 1. Quality Gate
@@ -541,7 +550,28 @@ async def resolve_meal_vision(
         ),
         observations=obs_items,
         model_version=meal_obs.model_version,
+        # Which model ran is an operator setting the user cannot see. Reporting
+        # whether it was a free endpoint is what makes their consent informed: free
+        # OpenRouter endpoints may train on or publish what they receive. The mock
+        # never leaves this process, so it is not a third-party disclosure.
+        provider_may_train_on_input=_model_may_train(provider, meal_obs.model_version),
     )
+
+
+def _model_may_train(provider: OpenRouterVisionProvider, model_version: str) -> bool:
+    """True when the model that read the photo was a free, training-permitted endpoint.
+
+    Conservative on failure: if the catalogue cannot be consulted, say the provider
+    MAY train. Reporting "no training" because a lookup failed would be a stronger
+    claim than the evidence supports, in the direction that harms the user.
+    """
+    if model_version == MOCK_MODEL_VERSION:
+        return False
+    try:
+        model, _ = provider.resolve()
+    except VisionError:
+        return True
+    return model.is_free
 
 
 @app.post("/v1/compute", response_model=s.ComputeResponse, tags=["computation"])
@@ -1041,8 +1071,12 @@ def predict_glycemic_spike(req: s.GlycemicResponseRequest) -> s.GlycemicResponse
 async def analyze_perception(
     req: s.PerceptionRequest,
     svc: _Services = Depends(get_services),
+    user_id: str = Depends(current_user),
 ) -> s.PerceptionResponse:
     """Read a meal photo: what is on the plate, and roughly how much of it.
+
+    Requires `vision_third_party`, like /v1/vision/resolve: the image goes to an
+    external provider.
 
     This used to ignore the image entirely -- it defaulted `user_hint` to
     "masala dosa" and returned a fixed bounding box at confidence 0.88 whatever you
@@ -1054,6 +1088,8 @@ async def analyze_perception(
     substitute for looking.
     """
     import base64
+
+    require_consent(svc, user_id, "vision_third_party")
 
     if not req.image_base64:
         raise HTTPException(

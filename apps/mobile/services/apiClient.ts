@@ -175,6 +175,10 @@ export class PathyamAPIClient {
   /**
    * Upload a meal photo for perception and entity resolution.
    *
+   * Requires the `vision_third_party` consent purpose: the photo leaves Pathyam
+   * and is processed by an external provider. Without it the server returns 403
+   * naming the purpose, which ApiError.missingConsentPurpose surfaces.
+   *
    * Returns 501 when no vision model is configured server-side, and 502 when the
    * upstream call fails. Neither is retryable by the client and neither returns a
    * fabricated meal — the provider used to fall back to a canned plate of dosa and
