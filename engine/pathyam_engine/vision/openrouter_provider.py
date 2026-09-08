@@ -81,6 +81,15 @@ _GATEWAY_ENV = "PATHYAM_VISION_BASE_URL"
 
 _DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
+# A meal extraction is a small JSON object -- a handful of items, each a label, a
+# preparation and five portion numbers. 2048 tokens is generous for that.
+#
+# Leaving it unset is not "no limit", it is the model's own ceiling: OpenRouter then
+# reserves credit against the full 65,536-token output window and refuses the call
+# with 402 when the balance cannot cover a response that was never going to happen.
+# A real call surfaced exactly that. It also bounds what a runaway response can cost.
+_MAX_OUTPUT_TOKENS = 2048
+
 
 class VisionError(RuntimeError):
     """A vision call was attempted and failed. Never swallowed into a mock."""
@@ -708,6 +717,7 @@ class OpenRouterVisionProvider(VisionProvider):
         body = {
             "model": model.id,
             "temperature": 0.2,
+            "max_tokens": _MAX_OUTPUT_TOKENS,
             "messages": [
                 {"role": "system", "content": system},
                 {

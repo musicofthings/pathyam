@@ -675,3 +675,29 @@ async def test_openrouter_itself_still_requires_a_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     with pytest.raises(VisionNotConfigured, match="no OpenRouter API key"):
         await OpenRouterVisionProvider().analyse_meal(FAKE_JPEG)
+
+
+def test_the_request_bounds_its_output_tokens(monkeypatch):
+    """Leaving max_tokens unset is not "no limit", it is the model's own ceiling.
+
+    OpenRouter then reserves credit against the full output window — 65,536 tokens
+    on gemini-3.7-flash — and answers 402 when the balance cannot cover a response
+    that was never going to happen. A meal extraction is a small JSON object.
+    """
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({"model": "m", "choices": [{"message": {"content": '{"items": []}'}}]}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = json.loads(req.data.decode())
+        return _Resp()
+
+    monkeypatch.setattr(op.urllib.request, "urlopen", fake_urlopen)
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
+    provider._post_completion(FAKE_JPEG, _cat(_raw("vendor/sees-images"))[0])
+
+    assert captured["body"]["max_tokens"] == 2048
