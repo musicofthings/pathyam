@@ -459,3 +459,31 @@ def test_a_model_without_strict_schemas_gets_the_schema_in_the_prompt(monkeypatc
     system = body["messages"][0]["content"]
     assert "visual_label" in system, "the schema must reach a model that cannot be given one"
     assert "estimated_portion" in system
+
+
+def test_a_router_is_never_selected_automatically():
+    """openrouter/free and openrouter/auto forward to some other model.
+
+    Found by a real call: `openrouter/free` advertises structured_outputs and
+    answered a meal photo with the bare string 'User Safety: safe' — because the
+    capability belongs to the router, not to whichever model it picked. It
+    "selects free models at random", so it also makes model_version name the router
+    instead of what read the photograph, and lets two photos in one sitting be read
+    by different models with nothing recording the switch.
+
+    Explicit configuration can still name one; this governs `auto` only.
+    """
+    catalogue = _cat(_raw("openrouter/free", ctx=200000),
+                     _raw("vendor/real-model", ctx=1000))
+    assert [m.id for m in op.usable_models(catalogue, today=TODAY)] == ["vendor/real-model"]
+    assert op.select_vision_model(
+        catalogue, prefer=op.PREFER_FREE, today=TODAY).id == "vendor/real-model"
+
+
+def test_an_explicitly_configured_router_is_still_allowed(monkeypatch):
+    """The exclusion is about automatic selection, not about forbidding the model."""
+    monkeypatch.setattr(op, "_get_json", lambda url, **kw: {
+        "data": [_raw("openrouter/free"), _raw("vendor/real-model")]})
+    model, why = op.resolve_model("openrouter/free", today=TODAY)
+    assert model.id == "openrouter/free"
+    assert "configured explicitly" in why

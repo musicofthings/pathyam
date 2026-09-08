@@ -179,6 +179,27 @@ class VisionModel:
     expires_on: dt.date | None
 
     @property
+    def is_router(self) -> bool:
+        """OpenRouter's own meta-endpoints, which forward to some other model.
+
+        `openrouter/free` "selects free models at random"; `openrouter/auto` routes
+        by community spend. Three reasons they are unfit for automatic selection,
+        the first of which was found by an actual call returning
+        ``'User Safety: safe'`` instead of JSON:
+
+        * the capabilities they advertise are not binding on whichever model
+          actually serves the request, so `structured_outputs: true` on the router
+          says nothing about the model that answers;
+        * `model_version` would record the router, not what read the photograph —
+          the provenance the whole module exists to keep honest;
+        * the choice changes per request, so two photos in one sitting can be read
+          by different models with nothing recording the switch.
+
+        An operator can still name one explicitly. This only governs `auto`.
+        """
+        return self.id.startswith("openrouter/")
+
+    @property
     def has_variable_pricing(self) -> bool:
         """OpenRouter marks auto-routed models with a negative price.
 
@@ -328,6 +349,7 @@ def usable_models(
     return [
         m for m in catalogue
         if m.response_format_mode != "none"
+        and not m.is_router
         and not m.has_variable_pricing
         and (m.expires_on is None or m.expires_on > today + _EXPIRY_MARGIN)
     ]
