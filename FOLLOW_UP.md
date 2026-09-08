@@ -38,7 +38,7 @@ in-process only, so the edge limit is still worth having; see README.)_
 
 | # | What | Notes |
 |---|---|---|
-| 10 | Password reset + email verification | Needs somewhere to send mail. An account whose password is forgotten is currently unrecoverable. |
+| 10 | ~~Password reset~~ / email verification | **Reset done** (`7e54a0e`): single-use 1h tokens, no user enumeration, revokes every other session, clears the lockout. `pathyam_api/mailer.py` is stdlib SMTP and refuses the console mailer in production. **Set `SMTP_HOST`** or reset mail goes to the log. Email *verification* at sign-up is still not implemented. |
 | 12 | Semantic retrieval (pgvector) | Needs an embedding provider. `reciprocal_rank_fusion` is correct and unused until a second arm exists. I would not add a stub returning lexical results under a semantic name — that is what I removed. |
 | 13 | Romanised resolution: last ~2 queries | 63.3% against a 70.0% ceiling. **Re-diagnosed 2026-09-08: smaller than this said.** The dosa cluster is already fixed. Of three remaining reachable failures, `pulihora` is not a resolver bug — held out from tamarind rice, lemon rice legitimately contains the exact token via `nimmakaya pulihora`, so preferring it is correct. Real headroom is `saaru` and `uppittu`; fixing 2 of 145 risks overfitting the eval set. |
 | 14 | Mobile app | **Largely done.** Rewritten: real API calls, bearer auth, HealthKit/Health Connect glucose sync, no localhost fallback, light theme. Four fabrications removed (see `apps/mobile/README.md`) including client-side calorie computation. Typechecks strict; **still never installed or built**, no lockfile, Expo 51/RN 0.74. Left: photo screen, token persistence. |
