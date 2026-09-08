@@ -629,7 +629,11 @@ class OpenRouterVisionProvider(VisionProvider):
         if self.is_mocked:
             return self._generate_mock_observation(image_bytes)
 
-        if not self.api_key:
+        # A key is required for OpenRouter itself. A local gateway holds the upstream
+        # credential and authenticates its own callers however it likes — often not at
+        # all on localhost — and forwarding OpenRouter's key to it is simply wrong:
+        # OmniRoute answers 401 "Invalid API key" because the key is not its.
+        if not self.api_key and is_openrouter(self.base_url):
             raise VisionNotConfigured(
                 f"no OpenRouter API key: set {_KEY_ENV}, or set {_MOCK_ENV}=1 to use "
                 "the offline mock (which is clearly labelled as such)"
@@ -720,13 +724,17 @@ class OpenRouterVisionProvider(VisionProvider):
             "response_format": response_format,
         }
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             # Attribution only; neither carries user data. X-OpenRouter-Title is the
             # documented name (X-Title is accepted as an alias).
             "HTTP-Referer": "https://pathyam.app",
             "X-OpenRouter-Title": "Pathyam",
         }
+        # Only sent when there is one. A gateway that needs no caller auth must not
+        # receive an upstream provider's key.
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(body).encode("utf-8"),

@@ -632,3 +632,46 @@ def test_pointing_at_openrouter_explicitly_is_fine_in_production(monkeypatch):
     monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "https://openrouter.ai/api/v1")
     monkeypatch.setenv("PATHYAM_ENV", "production")
     assert op._base_url() == "https://openrouter.ai/api/v1"
+
+
+def test_a_gateway_may_be_called_without_a_key(monkeypatch):
+    """A local gateway holds the upstream credential and often needs no caller auth.
+
+    Requiring a key there, and forwarding OpenRouter's, is simply wrong: OmniRoute
+    answers 401 "Invalid API key" because the key is not its to check.
+    """
+    monkeypatch.setenv("PATHYAM_VISION_BASE_URL", "http://localhost:20128/v1")
+    monkeypatch.delenv("PATHYAM_MOCK_VISION", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({"model": "up/stream",
+                               "choices": [{"message": {"content": '{"items": []}'}}]}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        captured["headers"] = {k.lower() for k in req.headers}
+        return _Resp()
+
+    monkeypatch.setattr(op.urllib.request, "urlopen", fake_urlopen)
+    provider = OpenRouterVisionProvider(model_name="openrouter/vendor/model")
+    model, _ = provider.resolve()
+    provider._post_completion(FAKE_JPEG, model)
+
+    assert "authorization" not in captured["headers"], \
+        "an upstream provider's key must not be forwarded to a gateway"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_itself_still_requires_a_key(monkeypatch):
+    """The relaxation is scoped to gateways; OpenRouter proper is unchanged."""
+    monkeypatch.delenv("PATHYAM_VISION_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    monkeypatch.delenv("PATHYAM_MOCK_VISION", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(VisionNotConfigured, match="no OpenRouter API key"):
+        await OpenRouterVisionProvider().analyse_meal(FAKE_JPEG)
