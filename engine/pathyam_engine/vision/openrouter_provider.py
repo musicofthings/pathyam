@@ -182,20 +182,24 @@ class VisionModel:
     def is_router(self) -> bool:
         """OpenRouter's own meta-endpoints, which forward to some other model.
 
-        `openrouter/free` "selects free models at random"; `openrouter/auto` routes
-        by community spend. Three reasons they are unfit for automatic selection,
-        the first of which was found by an actual call returning
-        ``'User Safety: safe'`` instead of JSON:
+        `openrouter/free` selects at random from free models; `openrouter/auto`
+        routes by community spend. Both are kept out of AUTOMATIC selection, not
+        forbidden -- an operator can still name one.
 
-        * the capabilities they advertise are not binding on whichever model
-          actually serves the request, so `structured_outputs: true` on the router
-          says nothing about the model that answers;
-        * `model_version` would record the router, not what read the photograph —
-          the provenance the whole module exists to keep honest;
-        * the choice changes per request, so two photos in one sitting can be read
-          by different models with nothing recording the switch.
+        The reason is narrower than it first appeared, and worth stating accurately.
+        Per OpenRouter's free-router guide the router does filter candidates by the
+        capabilities a request needs, structured outputs included, so "it advertises
+        a capability it cannot honour" overstates it. And provenance is no longer an
+        objection at all: the response carries the model that actually answered, and
+        that is what this module now records.
 
-        An operator can still name one explicitly. This only governs `auto`.
+        What remains is empirical. The first live call through `openrouter/free`
+        returned the bare string ``'User Safety: safe'`` instead of JSON, so the
+        filtering is not airtight in practice. `auto` should pick something that
+        works without a retry, so it picks a model that is accountable for its own
+        capabilities. The docs also note free models carry lower rate limits and
+        variable availability, which is a second reason not to make one the default
+        an unattended deployment depends on.
         """
         return self.id.startswith("openrouter/")
 
@@ -544,7 +548,8 @@ class OpenRouterVisionProvider(VisionProvider):
         try:
             # urllib is blocking; a VLM round trip on the event loop stalls every
             # other in-flight request in the worker for its duration.
-            raw_text = await asyncio.to_thread(self._post_completion, image_bytes, model)
+            raw_text, served_by = await asyncio.to_thread(
+                self._post_completion, image_bytes, model)
         except VisionError:
             raise
         except Exception as exc:
@@ -560,14 +565,22 @@ class OpenRouterVisionProvider(VisionProvider):
             raise VisionError(
                 f"{model.id!r} did not return JSON: {raw_text[:200]!r}"
             ) from exc
-        # Stamped with the model that actually ran, not the spec that was configured:
-        # "auto" in a stored record would say nothing about what read the photograph.
-        return self._parse_observation_data(data, raw_text, model.id)
+        # Stamped with the model that ANSWERED, taken from the response — not the
+        # spec that was configured, and not the id that was asked for. "auto" in a
+        # stored record would say nothing about what read the photograph, and neither
+        # would a router's own name.
+        return self._parse_observation_data(data, raw_text, served_by)
 
     # ------------------------------------------------------------- transport --
 
-    def _post_completion(self, image_bytes: bytes, model: VisionModel) -> str:
-        """One chat/completions call. Returns the raw message content."""
+    def _post_completion(self, image_bytes: bytes, model: VisionModel) -> tuple[str, str]:
+        """One chat/completions call. Returns ``(content, model_that_answered)``.
+
+        The response carries the model that actually served the request, which is not
+        always the one asked for -- OpenRouter's routers forward to a model chosen per
+        request. Reading it back is what lets an observation record what read the
+        photograph rather than what was configured.
+        """
         data_uri = "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("ascii")
 
         # Held to the schema as tightly as the chosen model allows. json_schema is
@@ -615,9 +628,10 @@ class OpenRouterVisionProvider(VisionProvider):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            # OpenRouter uses these for attribution only; neither carries user data.
+            # Attribution only; neither carries user data. X-OpenRouter-Title is the
+            # documented name (X-Title is accepted as an alias).
             "HTTP-Referer": "https://pathyam.app",
-            "X-Title": "Pathyam",
+            "X-OpenRouter-Title": "Pathyam",
         }
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -634,7 +648,11 @@ class OpenRouterVisionProvider(VisionProvider):
                 f"OpenRouter returned {exc.code} for {model.id!r}: {detail}"
             ) from exc
 
-        # OpenRouter reports upstream provider errors inside a 200 body.
+        # OpenRouter reports upstream provider errors inside a 200 body, at the top
+        # level AND inside individual choices (per the API reference, an ErrorResponse
+        # with code/message/metadata can appear in a choice). Checking only the top
+        # level would surface a provider failure as an empty meal, as though the model
+        # had genuinely seen nothing on the plate.
         if payload.get("error"):
             raise VisionError(f"OpenRouter error for {model.id!r}: {payload['error']}")
 
@@ -643,13 +661,21 @@ class OpenRouterVisionProvider(VisionProvider):
             raise VisionError(
                 f"OpenRouter returned no choices for {model.id!r}: {str(payload)[:200]}"
             )
+        if choices[0].get("error"):
+            raise VisionError(
+                f"OpenRouter error for {model.id!r}: {choices[0]['error']}")
+
+        # What actually answered. A router forwards to a model chosen per request, so
+        # this is the only honest value for model_version.
+        served_by = str(payload.get("model") or model.id)
+
         content = (choices[0].get("message") or {}).get("content")
         if not content:
             raise VisionError(
                 f"{model.id!r} returned an empty message; "
                 f"finish_reason={choices[0].get('finish_reason')!r}"
             )
-        return content
+        return content, served_by
 
     # ----------------------------------------------------------- translation --
 

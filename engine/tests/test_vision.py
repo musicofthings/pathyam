@@ -126,7 +126,7 @@ async def test_a_non_json_reply_raises_rather_than_yielding_an_empty_meal(monkey
     monkeypatch.setattr(op, "_get_json", lambda url, **kw: _CATALOGUE)
     provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
     monkeypatch.setattr(provider, "_post_completion",
-                        lambda _i, _m: "I'm sorry, I can't identify this photo.")
+                        lambda _i, m: ("I'm sorry, I can't identify this photo.", m.id))
 
     with pytest.raises(VisionError, match="did not return JSON"):
         await provider.analyse_meal(FAKE_JPEG)
@@ -388,7 +388,8 @@ def test_the_request_carries_the_image_and_the_strict_schema(monkeypatch):
 
     provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
     strict = _cat(_raw("vendor/sees-images"))[0]
-    assert provider._post_completion(FAKE_JPEG, strict) == '{"items": []}'
+    content, served_by = provider._post_completion(FAKE_JPEG, strict)
+    assert content == '{"items": []}'
 
     assert captured["url"].endswith("/chat/completions")
     assert captured["auth"] == f"Bearer {PLACEHOLDER_KEY}"
@@ -487,3 +488,76 @@ def test_an_explicitly_configured_router_is_still_allowed(monkeypatch):
     model, why = op.resolve_model("openrouter/free", today=TODAY)
     assert model.id == "openrouter/free"
     assert "configured explicitly" in why
+
+
+# ------------------------------------- provenance from the response (per docs) ----
+
+def _stub_response(monkeypatch, payload: dict):
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return json.dumps(payload).encode()
+    monkeypatch.setattr(op.urllib.request, "urlopen", lambda req, timeout=None: _Resp())
+
+
+def test_the_model_that_answered_is_read_back_from_the_response(monkeypatch):
+    """OpenRouter's response carries the model that actually served the request.
+
+    It is not always the one asked for — a router forwards to a model chosen per
+    request — so this is the only honest value for model_version. The free-router
+    guide states the response reports which model was used.
+    """
+    _stub_response(monkeypatch, {
+        "model": "some-vendor/actually-answered",
+        "choices": [{"message": {"content": '{"items": []}'}}],
+    })
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="openrouter/free")
+    asked = _cat(_raw("openrouter/free"))[0]
+
+    _content, served_by = provider._post_completion(FAKE_JPEG, asked)
+    assert served_by == "some-vendor/actually-answered", \
+        "recording the router's own name would say nothing about what read the photo"
+
+
+def test_the_asked_for_model_is_used_when_the_response_names_none(monkeypatch):
+    _stub_response(monkeypatch, {"choices": [{"message": {"content": '{"items": []}'}}]})
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
+    asked = _cat(_raw("vendor/sees-images"))[0]
+    assert provider._post_completion(FAKE_JPEG, asked)[1] == "vendor/sees-images"
+
+
+def test_an_error_inside_a_choice_is_not_read_as_an_empty_meal(monkeypatch):
+    """The API reference documents an ErrorResponse appearing within a choice.
+
+    Checking only the top-level `error` would surface a provider failure as a meal
+    with no items, as though the model had genuinely seen nothing on the plate.
+    """
+    _stub_response(monkeypatch, {
+        "model": "vendor/sees-images",
+        "choices": [{"error": {"code": 502, "message": "upstream provider failed"}}],
+    })
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
+    asked = _cat(_raw("vendor/sees-images"))[0]
+    with pytest.raises(VisionError, match="upstream provider failed"):
+        provider._post_completion(FAKE_JPEG, asked)
+
+
+def test_the_attribution_header_uses_the_documented_name(monkeypatch):
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": '{"items": []}'}}]}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        captured["headers"] = {k.lower(): v for k, v in req.headers.items()}
+        return _Resp()
+
+    monkeypatch.setattr(op.urllib.request, "urlopen", fake_urlopen)
+    provider = OpenRouterVisionProvider(api_key=PLACEHOLDER_KEY, model_name="vendor/sees-images")
+    provider._post_completion(FAKE_JPEG, _cat(_raw("vendor/sees-images"))[0])
+
+    assert captured["headers"].get("X-openrouter-title".lower()) == "Pathyam"
+    assert captured["headers"].get("Http-referer".lower())
