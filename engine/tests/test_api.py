@@ -375,12 +375,7 @@ def _consent(client, user, *purposes):
 
 
 def test_a_logged_meal_is_written_to_the_database_not_process_memory(client):
-    """The point of the change: the row is in Postgres, reachable without the app.
-
-    Read back over an independent connection rather than a second TestClient --
-    constructing one re-runs the app lifespan and swaps the module-level pool out
-    from under the shared client.
-    """
+    """The point of the change: the row is in Postgres, reachable without the app."""
     import psycopg
 
     posted = client.post("/v1/log", json={"text": "2 idli", "n_samples": 120})
@@ -404,6 +399,27 @@ def test_a_logged_meal_is_written_to_the_database_not_process_memory(client):
     # And it comes back through the API.
     history = client.get("/v1/history").json()
     assert entry_id in {e["id"] for e in history["entries"]}
+
+
+def test_a_second_client_does_not_close_the_first_ones_pool(client):
+    """Overlapping lifespans share one pool; only the last exit closes it.
+
+    The pool was a module global, so entering the lifespan again -- which is all
+    constructing a second TestClient does -- replaced it, and the inner teardown
+    then closed the pool the outer client was still serving requests from. Every
+    subsequent request on `client` failed. It is reference-counted on app.state now,
+    so this reads as it should: both clients work, and the outer one survives the
+    inner one being torn down.
+    """
+    from fastapi.testclient import TestClient
+    from pathyam_api.main import app
+
+    with TestClient(app) as second:
+        assert second.get("/v1/health").status_code == 200
+        assert client.get("/v1/health").status_code == 200
+
+    # The inner client is gone; the outer one must still hold a live pool.
+    assert client.get("/v1/health").status_code == 200
 
 
 def test_one_users_journal_is_invisible_to_another(client):

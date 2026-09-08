@@ -40,9 +40,6 @@ from .journal import (GlucoseRepository, JournalRepository, dev_identity_allowed
                       resolve_user_id)
 from .ratelimit import AUTH_LIMIT, RateLimiter, RateLimitExceeded, client_address
 
-_POOL: Any = None
-
-
 def _dsn() -> str:
     dsn = os.environ.get("PATHYAM_DSN")
     if not dsn:
@@ -52,15 +49,32 @@ def _dsn() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _POOL
+    """Open one connection pool per application, and keep it open while anyone holds it.
+
+    The pool used to be a module global. That made it process-wide rather than
+    app-wide: entering the lifespan a second time -- which is exactly what
+    constructing a second TestClient does -- replaced the live pool, and the first
+    client's teardown then closed the pool the second was still using. A test had to
+    read back over an independent psycopg connection to work around it.
+
+    Two changes fix that. The pool hangs off ``app.state``, so it is scoped to the
+    application object. And overlapping lifespans are reference-counted, so nested
+    or concurrent enters share one pool and only the last exit closes it.
+    """
     import psycopg_pool
 
-    _POOL = psycopg_pool.ConnectionPool(_dsn(), min_size=1, max_size=8, open=True)
+    depth = getattr(app.state, "pool_depth", 0)
+    if depth == 0:
+        app.state.pool = psycopg_pool.ConnectionPool(
+            _dsn(), min_size=1, max_size=8, open=True)
+    app.state.pool_depth = depth + 1
     try:
         yield
     finally:
-        _POOL.close()
-        _POOL = None
+        app.state.pool_depth -= 1
+        if app.state.pool_depth == 0:
+            app.state.pool.close()
+            app.state.pool = None
 
 
 app = FastAPI(
@@ -120,10 +134,11 @@ class _Services:
         self.auth = AuthRepository(conn)
 
 
-def get_services():
-    if _POOL is None:
+def get_services(request: Request):
+    pool = getattr(request.app.state, "pool", None)
+    if pool is None:
         raise HTTPException(503, "service is starting")
-    with _POOL.connection() as conn:
+    with pool.connection() as conn:
         yield _Services(conn)
 
 
