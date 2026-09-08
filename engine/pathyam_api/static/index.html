@@ -299,17 +299,23 @@
         </div>
       </div>
 
-      <!-- CGT Daily Spike Card -->
-      <div class="card">
+      <!-- Measured glucose card.
+           Everything here used to be static: a "Patch Connected" badge that was a
+           plain <span>, a literal 95 mg/dL, and "Postprandial trajectory optimal" —
+           a clinical reassurance, shown to someone managing type 2 diabetes, with no
+           data behind it. The number it later filled in was the ILLUSTRATIVE curve,
+           not a measurement. Every element below is now driven by app.cgm_reading and
+           the whole card hides when no sensor has reported. -->
+      <div class="card" id="dash-glucose-card">
         <div class="card-title">
-          <span>CGT Sensor Spike</span>
-          <span style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:99px;background:var(--accent-coral-light);color:var(--accent-coral);font-weight:700;">Patch Connected</span>
+          <span>Measured Glucose</span>
+          <span id="dash-glucose-badge" style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:99px;background:var(--accent-coral-light);color:var(--accent-coral);font-weight:700;"></span>
         </div>
-        <div style="display:flex;align-items:baseline;gap:0.75rem;margin-top:0.75rem;">
-          <div class="ring-val" id="dash-peak-glucose" style="color:var(--cgt-pink);">95</div>
-          <span style="font-size:0.95rem;color:var(--text-secondary);font-weight:600;">mg/dL Peak Spike</span>
+        <div id="dash-glucose-value" style="display:flex;align-items:baseline;gap:0.75rem;margin-top:0.75rem;">
+          <div class="ring-val" id="dash-peak-glucose" style="color:var(--cgt-pink);">—</div>
+          <span style="font-size:0.95rem;color:var(--text-secondary);font-weight:600;">mg/dL highest today</span>
         </div>
-        <p style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;">Baseline: 95 mg/dL · Postprandial trajectory optimal</p>
+        <p id="dash-glucose-note" style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;"></p>
       </div>
     </div>
 
@@ -954,7 +960,28 @@ async function loadDashboardSummary() {
     $('#dash-fibre').textContent = Math.round(d.fibre_g);
     $('#dash-fill-fibre').style.width = `${Math.min(100, (d.fibre_g / d.target_fibre_g) * 100)}%`;
 
-    $('#dash-peak-glucose').textContent = Math.round(d.daily_peak_glucose_mg_dl);
+    // Measured only. A null peak means no sensor reported today, and that renders
+    // as "no readings" — never as a number. The card used to show a hardcoded 95
+    // under a hardcoded "Patch Connected" badge whatever the data said.
+    const peak = d.daily_peak_glucose_mg_dl;
+    const nReadings = d.glucose_readings_today || 0;
+    const badge = $('#dash-glucose-badge');
+    const note = $('#dash-glucose-note');
+    if (peak === null || peak === undefined || nReadings === 0) {
+      $('#dash-peak-glucose').textContent = '—';
+      badge.textContent = 'No sensor';
+      badge.style.background = 'var(--surface-muted, #EEE)';
+      badge.style.color = 'var(--text-muted)';
+      note.textContent = 'No glucose readings today. Connect a CGM to see measured values here.';
+    } else {
+      $('#dash-peak-glucose').textContent = Math.round(peak);
+      badge.textContent = 'Measured';
+      badge.style.background = 'var(--accent-coral-light)';
+      badge.style.color = 'var(--accent-coral)';
+      // Says what it is and how much is behind it. No interpretation: judging a
+      // trajectory "optimal" is a clinical claim this app is in no position to make.
+      note.textContent = `Highest of ${nReadings} reading${nReadings === 1 ? '' : 's'} recorded today.`;
+    }
 
     if (d.recent_entries?.length) {
       $('#dash-timeline').innerHTML = d.recent_entries.map(e => `

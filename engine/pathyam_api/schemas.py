@@ -295,7 +295,15 @@ class DailyDashboardSummary(BaseModel):
     target_carbs_g: float = 225.0
     fibre_g: float
     target_fibre_g: float = 30.0
-    daily_peak_glucose_mg_dl: float
+    # None when no sensor reading exists for the day. It used to default to 95.0,
+    # so a user who had never worn a CGM saw a plausible number presented as a
+    # measurement. Absent data renders as absent.
+    daily_peak_glucose_mg_dl: float | None = Field(
+        default=None,
+        description="Highest MEASURED glucose today, or null when no sensor reported.")
+    glucose_readings_today: int = Field(
+        default=0,
+        description="Readings behind the peak. 0 means no sensor is connected.")
     meals_logged_count: int
     recent_entries: list[JournalEntry]
 

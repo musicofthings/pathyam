@@ -985,3 +985,112 @@ def test_vision_consent_is_registered_as_optional_not_required(client):
     # The notice has to say the photo leaves Pathyam; that is the whole disclosure.
     assert "leaves Pathyam" in description
     assert "text instead" in description
+
+
+# ------------------------------------------------------ dashboard glucose card ----
+#
+# The dashboard card used to assert a sensor reading that did not exist. Three
+# separate fabrications, stacked:
+#
+#   * "Patch Connected" was a hardcoded <span> — nothing checked for readings.
+#   * daily_peak_glucose_mg_dl was `max([...], default=95.0)`, so a user with no
+#     meals and no sensor saw 95 mg/dL as though it had been measured.
+#   * when meals DID exist, the number was _illustrative_peak() over their macros —
+#     an unfitted prediction — displayed under a "CGT Sensor Spike" heading beside
+#     "Postprandial trajectory optimal", a clinical judgement with nothing behind it.
+#
+# The real readings were in app.cgm_reading the whole time and nothing read them.
+
+
+def test_the_dashboard_reports_no_glucose_when_no_sensor_reported(client):
+    """The 95.0 default is gone. Absent data renders as absent."""
+    user = "d0000000-0000-0000-0000-0000000000f1"
+    _consent(client, user, "core_service")
+
+    summary = client.get("/v1/dashboard/summary",
+                         headers={"X-Pathyam-User": user}).json()
+
+    assert summary["daily_peak_glucose_mg_dl"] is None
+    assert summary["glucose_readings_today"] == 0
+
+
+def test_logging_a_meal_does_not_manufacture_a_glucose_reading(client):
+    """A meal is not a measurement.
+
+    This is the substantive change: the figure used to be the illustrative CGT
+    curve over the meal's macros, shown as a sensor spike. Eating without wearing a
+    sensor must produce no glucose number at all.
+    """
+    user = "d0000000-0000-0000-0000-0000000000f2"
+    _consent(client, user, "core_service")
+    logged = client.post("/v1/log", json={"text": "2 idli", "n_samples": 120},
+                         headers={"X-Pathyam-User": user})
+    assert logged.status_code == 200
+
+    summary = client.get("/v1/dashboard/summary",
+                         headers={"X-Pathyam-User": user}).json()
+
+    # The meal is recorded (energy depends on which templates this database carries,
+    # so the count is what to assert here, not kcal).
+    assert summary["meals_logged_count"] >= 1
+    assert summary["daily_peak_glucose_mg_dl"] is None
+    assert summary["glucose_readings_today"] == 0
+
+
+def test_the_dashboard_reports_the_measured_peak_not_the_predicted_one(client):
+    """With a sensor, the number is the maximum of app.cgm_reading."""
+    import datetime
+
+    user = "d0000000-0000-0000-0000-0000000000f3"
+    _consent(client, user, "core_service", "cgm_telemetry")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    readings = [
+        {"timestamp": (now - datetime.timedelta(minutes=m)).isoformat(),
+         "glucose_mg_dl": v, "trend_arrow": "flat"}
+        for m, v in [(90, 101.0), (60, 187.0), (30, 118.0)]
+    ]
+    assert client.post("/v1/cgt/telemetry", json={"readings": readings},
+                       headers={"X-Pathyam-User": user}).status_code == 200
+
+    # A meal too, so the illustrative curve has macros to work from. If the endpoint
+    # regressed to that curve, it would not produce 187.
+    client.post("/v1/log", json={"text": "2 idli", "n_samples": 120},
+                headers={"X-Pathyam-User": user})
+
+    summary = client.get("/v1/dashboard/summary",
+                         headers={"X-Pathyam-User": user}).json()
+
+    assert summary["daily_peak_glucose_mg_dl"] == 187.0
+    assert summary["glucose_readings_today"] == 3
+
+
+def test_one_users_glucose_peak_is_invisible_to_another(client):
+    """The peak is per-user, like every other row in app.*."""
+    import datetime
+
+    owner = "d0000000-0000-0000-0000-0000000000f4"
+    other = "d0000000-0000-0000-0000-0000000000f5"
+    _consent(client, owner, "core_service", "cgm_telemetry")
+    _consent(client, other, "core_service", "cgm_telemetry")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    client.post("/v1/cgt/telemetry", headers={"X-Pathyam-User": owner}, json={
+        "readings": [{"timestamp": now.isoformat(), "glucose_mg_dl": 201.0,
+                      "trend_arrow": "flat"}]})
+
+    theirs = client.get("/v1/dashboard/summary",
+                        headers={"X-Pathyam-User": other}).json()
+    assert theirs["daily_peak_glucose_mg_dl"] is None
+
+
+def test_the_dashboard_card_makes_no_clinical_judgement(client):
+    """"Postprandial trajectory optimal" was static text under the glucose figure.
+
+    A reassurance about someone's glucose trajectory is a clinical claim, and it was
+    rendered whatever the data said — including when there was none.
+    """
+    page = client.get("/").text
+    assert "trajectory optimal" not in page.replace("Postprandial trajectory optimal\" —", "")
+    assert "<span>CGT Sensor Spike</span>" not in page
+    assert "<span>Measured Glucose</span>" in page

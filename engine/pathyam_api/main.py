@@ -412,8 +412,16 @@ _STATIC = Path(__file__).parent / "static"
 
 @app.get("/", include_in_schema=False)
 def index():
-    """Single-file test page. Development only — there is no auth on this service."""
-    return FileResponse(_STATIC / "index.html")
+    """Single-file test page, for development.
+
+    Served no-store. It is edited constantly during development and the browser will
+    otherwise hold a stale copy against its ETag — which looks exactly like a change
+    that did not take effect, and cost time at least once.
+    """
+    return FileResponse(
+        _STATIC / "index.html",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 
 @app.get("/manifest.json", include_in_schema=False)
@@ -819,6 +827,10 @@ def get_dashboard_summary(
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     entries = svc.journal.list_entries(user_id, today_str)
 
+    peak_glucose, reading_count = svc.glucose.daily_measured_peak(user_id, today_str)
+    if peak_glucose is not None:
+        peak_glucose = round(peak_glucose, 1)
+
     tot_kcal = sum(e.total_kcal for e in entries)
     # 2000 kcal is a generic adult default, not a personalised target. Personalising
     # it needs the anthropometry and activity data the user has not been asked for.
@@ -833,8 +845,15 @@ def get_dashboard_summary(
         fat_g=round(sum(e.fat_g for e in entries), 1),
         carbs_g=round(sum(e.carbs_g for e in entries), 1),
         fibre_g=round(sum(e.fibre_g for e in entries), 1),
-        daily_peak_glucose_mg_dl=round(
-            max([e.peak_glucose_mg_dl for e in entries], default=95.0), 1),
+        # MEASURED, from app.cgm_reading — not the illustrative curve.
+        #
+        # This used to report max(e.peak_glucose_mg_dl), which is _illustrative_peak()
+        # over the meal's macros: an unfitted prediction, surfaced under a "CGT Sensor
+        # Spike / Patch Connected" card as though a sensor had measured it. And it
+        # defaulted to 95.0, so a user with no meals and no sensor still saw a number.
+        # The real readings were in app.cgm_reading the whole time and nothing read them.
+        daily_peak_glucose_mg_dl=peak_glucose,
+        glucose_readings_today=reading_count,
         meals_logged_count=len(entries),
         recent_entries=entries[:3],
     )

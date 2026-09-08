@@ -355,6 +355,29 @@ class GlucoseRepository:
             )
             return int(cur.fetchone()[0])
 
+    def daily_measured_peak(self, user_id: str, day: str) -> tuple[float | None, int]:
+        """Highest MEASURED glucose on one local day, and how many readings backed it.
+
+        Returns ``(None, 0)`` when the user wore no sensor. There is deliberately no
+        fallback value: the dashboard previously defaulted to 95.0 mg/dL, so a user
+        who had never connected a sensor was shown a plausible reading as though it
+        had been measured. An absent measurement must render as absent.
+
+        The count travels with the peak because "no sensor" and "a sensor reporting
+        one reading" are different situations and a bare number hides the difference.
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """SELECT max(glucose_mg_dl), count(*)
+                     FROM app.cgm_reading
+                    WHERE user_id = %s
+                      AND reading_at >= %s::date
+                      AND reading_at <  %s::date + interval '1 day'""",
+                (user_id, day, day),
+            )
+            peak, count = cur.fetchone()
+        return (float(peak) if peak is not None else None, int(count))
+
     def postprandial_readings(self, user_id: str, meal_log_id: str) -> list[dict[str, Any]]:
         """Readings in the 3h after one meal, as minutes since it.
 
