@@ -1,565 +1,395 @@
-import React, { useState } from 'react';
+/**
+ * Pathyam mobile client.
+ *
+ * WHAT THIS REPLACED
+ * ------------------
+ * The previous App.tsx was a demo that fabricated all four of the product's core
+ * claims, in the UI layer, after the same fabrications had been removed from the
+ * engine:
+ *
+ *   1. A hardcoded "observed" plate (white rice at confidence 0.93, sambar at 0.88)
+ *      presented as vision output. The engine's vision provider was rewritten to
+ *      fail loudly rather than return exactly this; the app kept returning it.
+ *   2. `setTimeout(1200)` followed by an alert reading "Meal photo analyzed!" —
+ *      an analysis that never ran, reported as one that had.
+ *   3. Calories computed **in the client** as
+ *      `label.includes('rice') ? 130 : 65` grams per 100 g, wrapped in a ±22%/26%
+ *      interval. A calorie figure derived from a substring match, shown with an
+ *      uncertainty band, to a person managing type 2 diabetes. The architecture
+ *      rule this breaks is the one the whole system rests on: the deterministic
+ *      engine computes nutrients and the client never does.
+ *   4. Two clinical claims stamped "Verified" by a badge that verified nothing,
+ *      one of them carrying a real-looking PMID.
+ *
+ * None of it called the API. It could not have: it sent no Authorization header,
+ * and every endpoint it named has required a bearer token since authentication
+ * landed.
+ *
+ * WHAT THIS IS
+ * ------------
+ * A smaller app that actually talks to the server. Every number on screen came
+ * from the engine; nothing is computed here.
+ */
+
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
-  View,
+  TextInput,
   TouchableOpacity,
-  ScrollView,
-  SafeAreaView,
-  StatusBar,
-  ActivityIndicator,
-  Alert,
+  View,
 } from 'react-native';
 
-interface PortionState {
-  grams: number;
-  minGrams: number;
-  maxGrams: number;
-  uncertainty: 'low' | 'medium' | 'high';
-}
+import { ApiError, apiClient } from './services/apiClient';
+import { CONSENT_CGM_TELEMETRY } from './services/config';
+import { GlucoseSync, SyncResult, platformHealthStore } from './services/glucose';
 
-interface ObservedFoodItem {
+type Tab = 'log' | 'glucose';
+
+interface HistoryEntry {
   id: string;
-  visualLabel: string;
-  preparation: string;
-  confidence: number;
-  portion: PortionState;
-  selectedCandidate: string;
-  candidates: string[];
+  notes?: string;
+  energy_kcal?: number | null;
+  energy_low?: number | null;
+  energy_high?: number | null;
+  meal_type?: string;
+  consumed_at?: string;
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'camera' | 'review' | 'compute' | 'evidence'>('review');
-  const [isAnalysing, setIsAnalysing] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [tab, setTab] = useState<Tab>('log');
 
-  // Mock Gemini 3.7 Flash extraction state
-  const [observedItems, setObservedItems] = useState<ObservedFoodItem[]>([
-    {
-      id: '1',
-      visualLabel: 'White Rice',
-      preparation: 'Boiled',
-      confidence: 0.93,
-      portion: { grams: 180, minGrams: 140, maxGrams: 230, uncertainty: 'medium' },
-      selectedCandidate: 'PY-F-000001: Rice, parboiled, milled',
-      candidates: [
-        'PY-F-000001: Rice, parboiled, milled',
-        'PY-F-000002: Rice, raw, milled',
-      ],
-    },
-    {
-      id: '2',
-      visualLabel: 'Sambar',
-      preparation: 'Simmered',
-      confidence: 0.88,
-      portion: { grams: 140, minGrams: 100, maxGrams: 190, uncertainty: 'high' },
-      selectedCandidate: 'PY-F-000103: Sambar, vegetable',
-      candidates: ['PY-F-000103: Sambar, vegetable', 'PY-F-000104: Rasam, tomato'],
-    },
-  ]);
-
-  const updatePortion = (id: string, delta: number) => {
-    setObservedItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const newGrams = Math.max(20, item.portion.grams + delta);
-          return {
-            ...item,
-            portion: {
-              ...item.portion,
-              grams: newGrams,
-              minGrams: Math.round(newGrams * 0.8),
-              maxGrams: Math.round(newGrams * 1.25),
-            },
-          };
-        }
-        return item;
-      })
-    );
-  };
-
-  const calculateTotalEnergy = () => {
-    return observedItems.reduce((acc, item) => {
-      const per100 = item.visualLabel.toLowerCase().includes('rice') ? 130 : 65;
-      return acc + (item.portion.grams * per100) / 100;
-    }, 0);
-  };
-
-  const totalKcal = Math.round(calculateTotalEnergy());
-  const minKcal = Math.round(totalKcal * 0.78);
-  const maxKcal = Math.round(totalKcal * 1.26);
+  if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} />;
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
-
-      {/* App Header */}
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>PATHYAM</Text>
-        <Text style={styles.headerSubtitle}>AI-Native Clinical Nutrition Engine</Text>
+        <Text style={styles.headerSubtitle}>Regional South Indian nutrition</Text>
       </View>
 
-      {/* Tab Selector */}
       <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'camera' && styles.activeTabButton]}
-          onPress={() => setActiveTab('camera')}
-        >
-          <Text style={[styles.tabText, activeTab === 'camera' && styles.activeTabText]}>📷 Photo</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'review' && styles.activeTabButton]}
-          onPress={() => setActiveTab('review')}
-        >
-          <Text style={[styles.tabText, activeTab === 'review' && styles.activeTabText]}>🔍 Confirm</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'compute' && styles.activeTabButton]}
-          onPress={() => setActiveTab('compute')}
-        >
-          <Text style={[styles.tabText, activeTab === 'compute' && styles.activeTabText]}>🧮 Compute</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'evidence' && styles.activeTabButton]}
-          onPress={() => setActiveTab('evidence')}
-        >
-          <Text style={[styles.tabText, activeTab === 'evidence' && styles.activeTabText]}>📜 Evidence</Text>
-        </TouchableOpacity>
+        <TabButton label="Log" active={tab === 'log'} onPress={() => setTab('log')} />
+        <TabButton label="Glucose" active={tab === 'glucose'} onPress={() => setTab('glucose')} />
       </View>
 
       <ScrollView style={styles.content}>
-        {/* TAB 1: CAMERA PERCEPTION */}
-        {activeTab === 'camera' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Meal Photography Perception</Text>
-            <Text style={styles.cardDesc}>
-              Powered by Gemini 3.7 Flash GA with Schema-Constrained Output.
-            </Text>
-            <View style={styles.cameraFrame}>
-              <Text style={styles.cameraPlaceholderText}>[ Camera Viewfinder Ready ]</Text>
-              <Text style={styles.cameraSubtext}>Position plate in frame</Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => {
-                setIsAnalysing(true);
-                setTimeout(() => {
-                  setIsAnalysing(false);
-                  setActiveTab('review');
-                  Alert.alert('Gemini 3.7 Flash', 'Meal photo analyzed! Extracted visual observations.');
-                }, 1200);
-              }}
-            >
-              {isAnalysing ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.actionButtonText}>Capture & Analyse Meal</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* TAB 2: PORTION CONFIRMATION & ENTITY RESOLUTION */}
-        {activeTab === 'review' && (
-          <View>
-            <View style={styles.infoBanner}>
-              <Text style={styles.infoBannerText}>
-                ⚠️ LLM perceived visual items. You confirm final measurements; deterministic engine computes.
-              </Text>
-            </View>
-
-            {observedItems.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <View style={styles.cardHeaderRow}>
-                  <Text style={styles.itemTitle}>{item.visualLabel}</Text>
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{Math.round(item.confidence * 100)}% Match</Text>
-                  </View>
-                </View>
-
-                <Text style={styles.prepText}>Preparation: {item.preparation}</Text>
-
-                {/* Candidate Selection */}
-                <Text style={styles.sectionLabel}>Resolved Food Identity (IFCT):</Text>
-                <View style={styles.candidateBox}>
-                  <Text style={styles.candidateText}>✓ {item.selectedCandidate}</Text>
-                </View>
-
-                {/* Portion Counter & Slider */}
-                <Text style={styles.sectionLabel}>Portion Estimation Prior:</Text>
-                <View style={styles.portionRow}>
-                  <TouchableOpacity style={styles.counterBtn} onPress={() => updatePortion(item.id, -20)}>
-                    <Text style={styles.counterBtnText}>[−]</Text>
-                  </TouchableOpacity>
-
-                  <View style={styles.portionDisplay}>
-                    <Text style={styles.portionGramsText}>{item.portion.grams} g</Text>
-                    <Text style={styles.portionRangeText}>
-                      Range: {item.portion.minGrams}–{item.portion.maxGrams} g ({item.portion.uncertainty})
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity style={styles.counterBtn} onPress={() => updatePortion(item.id, 20)}>
-                    <Text style={styles.counterBtnText}>[+]</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-
-            <TouchableOpacity style={styles.actionButton} onPress={() => setActiveTab('compute')}>
-              <Text style={styles.actionButtonText}>Confirm & Compute Nutrition ➔</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* TAB 3: DETERMINISTIC COMPUTE */}
-        {activeTab === 'compute' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Deterministic Arithmetic Result</Text>
-            <Text style={styles.cardDesc}>
-              Bit-identical computation over IFCT 2017 provenance tables with Monte Carlo credible intervals.
-            </Text>
-
-            <View style={styles.metricHero}>
-              <Text style={styles.heroNumber}>{totalKcal} kcal</Text>
-              <Text style={styles.heroSub}>
-                Credible Interval: {minKcal} – {maxKcal} kcal (80% CI)
-              </Text>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.macroRow}>
-              <View style={styles.macroBox}>
-                <Text style={styles.macroValue}>11.4 g</Text>
-                <Text style={styles.macroLabel}>Protein</Text>
-              </View>
-              <View style={styles.macroBox}>
-                <Text style={styles.macroValue}>4.2 g</Text>
-                <Text style={styles.macroLabel}>Fat</Text>
-              </View>
-              <View style={styles.macroBox}>
-                <Text style={styles.macroValue}>58.6 g</Text>
-                <Text style={styles.macroLabel}>Carbs</Text>
-              </View>
-            </View>
-
-            <View style={styles.qcBox}>
-              <Text style={styles.qcText}>✓ FAO/Clinical QC Gates Passed</Text>
-              <Text style={styles.qcSub}>Energy Density: 132 kcal/100 g (within 60-250 range)</Text>
-            </View>
-          </View>
-        )}
-
-        {/* TAB 4: CLINICAL EVIDENCE */}
-        {activeTab === 'evidence' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Evidence Engine & Citations</Text>
-            <Text style={styles.cardDesc}>
-              All assertions are strictly bound to verified PubMed (PMID) / Crossref (DOI) & ICMR guidelines.
-            </Text>
-
-            <View style={styles.evidenceItem}>
-              <View style={styles.citationBadge}>
-                <Text style={styles.citationBadgeText}>PMID 35875218 Verified</Text>
-              </View>
-              <Text style={styles.evidenceStatement}>
-                "Idli shows a lower glycemic index (GI 60-68) compared to plain white rice (GI 75-82) due to urad dal pulse protein/fibre and natural fermentation."
-              </Text>
-              <Text style={styles.evidenceAuthor}>Shakappa D, et al. J Food Sci Technol (2022)</Text>
-            </View>
-
-            <View style={styles.evidenceItem}>
-              <View style={styles.citationBadge}>
-                <Text style={styles.citationBadgeText}>ICMR-NIN DGI 2024 Verified</Text>
-              </View>
-              <Text style={styles.evidenceStatement}>
-                "Fermented cereal-pulse combinations enhance B-vitamin bioavailability and reduce phytate content."
-              </Text>
-              <Text style={styles.evidenceAuthor}>ICMR-National Institute of Nutrition (2024)</Text>
-            </View>
-          </View>
-        )}
+        {tab === 'log' ? <LogScreen /> : <GlucoseScreen />}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={[styles.tabButton, active && styles.activeTabButton]} onPress={onPress}>
+      <Text style={[styles.tabText, active && styles.activeTabText]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+/** Shows what actually went wrong, including the server's own message. */
+function ErrorNote({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <View style={styles.errorBox}>
+      <Text style={styles.errorText}>{error}</Text>
+    </View>
+  );
+}
+
+function describe(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+// ------------------------------------------------------------------- auth --
+
+function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (mode: 'login' | 'register') => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (mode === 'login') await apiClient.login(email.trim(), password);
+      else await apiClient.register(email.trim(), password);
+      onSignedIn();
+    } catch (err) {
+      setError(describe(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>PATHYAM</Text>
+      </View>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Sign in</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="email"
+          placeholderTextColor="#64748B"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="password"
+          placeholderTextColor="#64748B"
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+        <ErrorNote error={error} />
+        <TouchableOpacity style={styles.actionButton} disabled={busy} onPress={() => submit('login')}>
+          {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.actionButtonText}>Sign in</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.secondaryButton} disabled={busy} onPress={() => submit('register')}>
+          <Text style={styles.secondaryButtonText}>Create an account</Text>
+        </TouchableOpacity>
+        <Text style={styles.note}>
+          There is no password reset yet. An account whose password is lost cannot be recovered.
+        </Text>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+// -------------------------------------------------------------------- log --
+
+function LogScreen() {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const history = await apiClient.history();
+      setEntries(history.entries as HistoryEntry[]);
+    } catch (err) {
+      setError(describe(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const submit = async () => {
+    if (!text.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiClient.logMeal(text.trim());
+      setText('');
+      await refresh();
+    } catch (err) {
+      setError(describe(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Log a meal</Text>
+        <Text style={styles.cardDesc}>In your own words — "2 idli and sambar", "ஒரு தோசை".</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="what did you eat?"
+          placeholderTextColor="#64748B"
+          value={text}
+          onChangeText={setText}
+          onSubmitEditing={submit}
+        />
+        <ErrorNote error={error} />
+        <TouchableOpacity style={styles.actionButton} disabled={busy} onPress={submit}>
+          {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.actionButtonText}>Log it</Text>}
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Recent</Text>
+        {entries.length === 0 ? (
+          <Text style={styles.note}>Nothing logged yet.</Text>
+        ) : (
+          entries.map((entry) => (
+            <View key={entry.id} style={styles.entryRow}>
+              <Text style={styles.entryTitle}>{entry.notes ?? '(no description)'}</Text>
+              <Text style={styles.entryValue}>{formatEnergy(entry)}</Text>
+            </View>
+          ))
+        )}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Render the engine's own interval. Never computed here, and never filled in when
+ * the engine returned nothing: a meal that did not resolve has no energy, and the
+ * previous journal used to substitute a flat 300 kcal in that case.
+ */
+function formatEnergy(entry: HistoryEntry): string {
+  if (entry.energy_kcal === null || entry.energy_kcal === undefined) return 'not computed';
+  const point = Math.round(entry.energy_kcal);
+  const low = entry.energy_low;
+  const high = entry.energy_high;
+  if (low === null || low === undefined || high === null || high === undefined) {
+    return `${point} kcal`;
+  }
+  return `${point} kcal (${Math.round(low)}–${Math.round(high)})`;
+}
+
+// ---------------------------------------------------------------- glucose --
+
+function GlucoseScreen() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SyncResult | null>(null);
+  const [consented, setConsented] = useState(false);
+
+  const grant = async () => {
+    setError(null);
+    try {
+      const res = await apiClient.grantConsent(CONSENT_CGM_TELEMETRY);
+      setConsented(res.granted);
+    } catch (err) {
+      setError(describe(err));
+    }
+  };
+
+  const sync = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const store = await platformHealthStore();
+      // A 24-hour window with deliberate overlap on every run. A sensor that
+      // reconnects backfills readings timestamped earlier than the last one seen,
+      // so syncing strictly forward from the newest timestamp would drop exactly
+      // the readings a connectivity gap produced. The server upserts, so overlap
+      // costs nothing.
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      setResult(await new GlucoseSync(store, apiClient).sync(since));
+    } catch (err) {
+      setError(describe(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Glucose</Text>
+        <Text style={styles.cardDesc}>
+          Reads readings your CGM already writes to {platformStoreName()}. Works with any sensor
+          that writes there, including FreeStyle Libre and Dexcom.
+        </Text>
+        <Text style={styles.note}>
+          A continuous trace shows when you eat, sleep, exercise and are ill, so it is stored only
+          if you grant it separately from the rest of the app.
+        </Text>
+
+        <TouchableOpacity style={styles.secondaryButton} onPress={grant}>
+          <Text style={styles.secondaryButtonText}>
+            {consented ? 'Consent granted' : 'Allow glucose storage'}
+          </Text>
+        </TouchableOpacity>
+
+        <ErrorNote error={error} />
+
+        <TouchableOpacity style={styles.actionButton} disabled={busy} onPress={sync}>
+          {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.actionButtonText}>Sync last 24 hours</Text>}
+        </TouchableOpacity>
+
+        {result && (
+          <View style={styles.entryRow}>
+            <Text style={styles.entryTitle}>
+              {result.accepted} stored, {result.duplicates} already had
+            </Text>
+            <Text style={styles.entryValue}>
+              {result.rejected > 0 ? `${result.rejected} out of range` : ''}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>About the glucose curve</Text>
+        <Text style={styles.note}>
+          Pathyam does not predict your glucose response. The curve in the API is illustrative:
+          its coefficients have never been fitted against measured readings. Storing yours is what
+          would make fitting possible.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function platformStoreName(): string {
+  return Platform.OS === 'ios' ? 'Apple Health' : 'Health Connect';
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  header: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-    backgroundColor: '#1E293B',
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#38BDF8',
-    letterSpacing: 1.5,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 2,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: '#1E293B',
-    padding: 4,
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  activeTabButton: {
-    backgroundColor: '#0284C7',
-  },
-  tabText: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '600',
-  },
-  activeTabText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { paddingHorizontal: 20, paddingVertical: 16 },
+  headerTitle: { color: '#0F172A', fontSize: 22, fontWeight: '700', letterSpacing: 2 },
+  headerSubtitle: { color: '#64748B', fontSize: 13, marginTop: 2 },
+  tabBar: { flexDirection: 'row', paddingHorizontal: 12, gap: 8 },
+  tabButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, backgroundColor: '#E2E8F0' },
+  activeTabButton: { backgroundColor: '#2563EB' },
+  tabText: { color: '#475569', fontWeight: '600' },
+  activeTabText: { color: '#FFFFFF' },
+  content: { flex: 1, paddingHorizontal: 12, marginTop: 12 },
   card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
+    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 12,
+    marginHorizontal: 8, borderWidth: 1, borderColor: '#E2E8F0',
   },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#F8FAFC',
-    marginBottom: 4,
-  },
-  cardDesc: {
-    fontSize: 13,
-    color: '#94A3B8',
-    marginBottom: 16,
-  },
-  cameraFrame: {
-    height: 220,
-    backgroundColor: '#090D16',
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#0284C7',
-    borderStyle: 'dashed',
-    marginBottom: 16,
-  },
-  cameraPlaceholderText: {
-    color: '#38BDF8',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  cameraSubtext: {
-    color: '#64748B',
-    fontSize: 12,
-    marginTop: 4,
+  cardTitle: { color: '#0F172A', fontSize: 17, fontWeight: '700', marginBottom: 4 },
+  cardDesc: { color: '#475569', fontSize: 13, marginBottom: 12 },
+  note: { color: '#64748B', fontSize: 12, marginTop: 10, lineHeight: 17 },
+  input: {
+    backgroundColor: '#F8FAFC', color: '#0F172A', borderRadius: 8,
+    borderWidth: 1, borderColor: '#CBD5E1',
+    paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, fontSize: 15,
   },
   actionButton: {
-    backgroundColor: '#0284C7',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 8,
+    backgroundColor: '#2563EB', borderRadius: 8, paddingVertical: 12,
+    alignItems: 'center', marginTop: 6,
   },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
+  actionButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  secondaryButton: { paddingVertical: 10, alignItems: 'center' },
+  secondaryButtonText: { color: '#2563EB', fontWeight: '600' },
+  errorBox: {
+    backgroundColor: '#FEF2F2', borderRadius: 8, padding: 10, marginBottom: 8,
+    borderWidth: 1, borderColor: '#FECACA',
   },
-  infoBanner: {
-    backgroundColor: '#1E3A8A',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#3B82F6',
+  errorText: { color: '#991B1B', fontSize: 13 },
+  entryRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0',
   },
-  infoBannerText: {
-    color: '#DBEAFE',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  itemTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F1F5F9',
-  },
-  badge: {
-    backgroundColor: '#065F46',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  badgeText: {
-    color: '#34D399',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  prepText: {
-    color: '#94A3B8',
-    fontSize: 12,
-    marginTop: 2,
-    marginBottom: 12,
-  },
-  sectionLabel: {
-    color: '#CBD5E1',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  candidateBox: {
-    backgroundColor: '#0F172A',
-    padding: 10,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  candidateText: {
-    color: '#38BDF8',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  portionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 4,
-  },
-  counterBtn: {
-    backgroundColor: '#334155',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 6,
-  },
-  counterBtnText: {
-    color: '#38BDF8',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  portionDisplay: {
-    alignItems: 'center',
-  },
-  portionGramsText: {
-    color: '#F8FAFC',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  portionRangeText: {
-    color: '#64748B',
-    fontSize: 10,
-    marginTop: 2,
-  },
-  metricHero: {
-    alignItems: 'center',
-    marginVertical: 12,
-  },
-  heroNumber: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: '#38BDF8',
-  },
-  heroSub: {
-    fontSize: 13,
-    color: '#94A3B8',
-    marginTop: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#334155',
-    marginVertical: 16,
-  },
-  macroRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  macroBox: {
-    alignItems: 'center',
-  },
-  macroValue: {
-    color: '#F8FAFC',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  macroLabel: {
-    color: '#64748B',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  qcBox: {
-    backgroundColor: '#064E3B',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 16,
-  },
-  qcText: {
-    color: '#6EE7B7',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  qcSub: {
-    color: '#A7F3D0',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  evidenceItem: {
-    backgroundColor: '#0F172A',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#38BDF8',
-  },
-  citationBadge: {
-    backgroundColor: '#1E3A8A',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginBottom: 6,
-  },
-  citationBadgeText: {
-    color: '#60A5FA',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  evidenceStatement: {
-    color: '#E2E8F0',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  evidenceAuthor: {
-    color: '#64748B',
-    fontSize: 11,
-    marginTop: 6,
-    fontStyle: 'italic',
-  },
+  entryTitle: { color: '#1E293B', fontSize: 14, flex: 1 },
+  entryValue: { color: '#475569', fontSize: 13 },
 });
